@@ -17,10 +17,6 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          # Full history so later steps that inspect tags/commits work.
-          # The previous `git pull` step (which was failing with exit 128)
-          # is no longer needed because checkout already gives us the
-          # correct ref.
           fetch-depth: 0
 
       - name: Setup Java
@@ -38,11 +34,6 @@ jobs:
         run: flutter pub get
 
       - name: Generate keystore or decode from secret
-        # If the KEYSTORE_BASE64 secret is configured, use the real
-        # keystore from it (Play Store-ready signing). Otherwise create
-        # a local keystore on the fly so the release build can still be
-        # signed. The resulting APK installs perfectly on Android TV for
-        # sideloading, it just cannot be uploaded to the Play Store.
         run: |
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
             echo "Using keystore from KEYSTORE_BASE64 secret"
@@ -65,36 +56,77 @@ jobs:
             echo "storeFile=keystore.jks" >> android/key.properties
           fi
 
-      - name: Build APK
-        # Build only for arm64 — this is the architecture used by every
-        # modern Android TV stick, TV box and TV itself, and avoids
-        # pulling in x86 native assets that most TVs do not need.
+      - name: Build release APK
         run: flutter build apk --release --target-platform android-arm64
 
-      - name: Dump final APK manifest (for compatibility debugging)
-        # If the device reports "app not compatible", we need to see which
-        # uses-feature or uses-permission the final APK actually carries.
-        # aapt2 comes with the Android SDK build tools already installed
-        # on the GitHub runner.
+      - name: Build debug APK (fallback)
+        # Debug APK is signed with Android's universal debug key, which
+        # most TV firmwares trust for sideloading. If the release APK
+        # still triggers "app not compatible", the debug APK usually
+        # installs fine and we can use it to narrow down the root cause.
+        if: always()
+        run: flutter build apk --debug --target-platform android-arm64
+
+      - name: Inspect final release APK (deep diagnostics)
         if: always()
         run: |
           APK=build/app/outputs/flutter-apk/app-release.apk
-          if [ -f "$APK" ]; then
-            BUILD_TOOLS_DIR=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -n1)
-            AAPT2="$BUILD_TOOLS_DIR/aapt2"
-            echo "=== Using aapt2 from: $AAPT2 ==="
-            echo "=== uses-feature / uses-permission declared in final APK ==="
-            "$AAPT2" dump badging "$APK" | grep -E "uses-feature|uses-permission|sdkVersion|native-code|supports-screens" || true
-            echo ""
-            echo "=== Full final AndroidManifest.xml (first 200 lines) ==="
-            "$AAPT2" dump xmltree "$APK" --file AndroidManifest.xml | head -200 || true
-          else
-            echo "APK not built, skipping manifest dump"
+          if [ ! -f "$APK" ]; then
+            echo "No release APK to inspect"
+            exit 0
           fi
+          BUILD_TOOLS_DIR=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -n1)
+          AAPT2="$BUILD_TOOLS_DIR/aapt2"
+          APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
 
-      - name: Upload APK Artifact
+          echo "================================================================"
+          echo "  1. Badging (shows applicationId, versionCode, launcher, ABIs)"
+          echo "================================================================"
+          "$AAPT2" dump badging "$APK" || true
+
+          echo ""
+          echo "================================================================"
+          echo "  2. Required vs optional uses-feature"
+          echo "================================================================"
+          "$AAPT2" dump badging "$APK" | grep -E "uses-feature|uses-permission|sdkVersion|native-code|supports-screens" || true
+
+          echo ""
+          echo "================================================================"
+          echo "  3. Merged AndroidManifest.xml (first 300 lines)"
+          echo "================================================================"
+          "$AAPT2" dump xmltree "$APK" --file AndroidManifest.xml | head -300 || true
+
+          echo ""
+          echo "================================================================"
+          echo "  4. Native libraries inside APK"
+          echo "================================================================"
+          unzip -l "$APK" | grep -E "\.so$|lib/" | head -50 || true
+
+          echo ""
+          echo "================================================================"
+          echo "  5. Signature scheme verification"
+          echo "================================================================"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" || true
+
+          echo ""
+          echo "================================================================"
+          echo "  6. APK summary"
+          echo "================================================================"
+          ls -lh "$APK"
+          unzip -l "$APK" | tail -1
+
+      - name: Upload release APK
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: purevideo-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
+          if-no-files-found: warn
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: purevideo-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: warn
