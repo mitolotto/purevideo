@@ -76,7 +76,13 @@ jobs:
           fi
 
       - name: Build release APK
-        run: flutter build apk --release --target-platform android-arm64
+        # Build a fat APK (contains arm64-v8a, armeabi-v7a, x86_64, x86).
+        # We do NOT pass --target-platform: this forced a single ABI and
+        # then, combined with each native plugin's own ABI set, resulted
+        # in an APK whose lib/ directory ended up EMPTY for the device
+        # architecture, breaking install with
+        # INSTALL_FAILED_NO_MATCHING_ABIS on Homatics Box R 4K Plus.
+        run: flutter build apk --release
 
       - name: Build debug APK (fallback)
         # Debug APK is signed with Android's universal debug key, which
@@ -84,7 +90,7 @@ jobs:
         # still triggers "app not compatible", the debug APK usually
         # installs fine and we can use it to narrow down the root cause.
         if: always()
-        run: flutter build apk --debug --target-platform android-arm64
+        run: flutter build apk --debug
 
       - name: Inspect final release APK (deep diagnostics)
         if: always()

@@ -74,11 +74,22 @@ android {
                 signingConfig = signingConfigs.getByName("release")
             }
 
-            ndk {
-                // Android TV boxes use arm64-v8a. We keep the APK small
-                // by excluding every other ABI.
-                abiFilters.add("arm64-v8a")
-            }
+            // NOTE: No abiFilters here. We want Gradle to ship whichever
+            // ABIs each native library (libmpv from media_kit, libpython
+            // from serious_python, libflutter.so, etc.) provides. Some
+            // of them ship only armeabi-v7a binaries, some only
+            // arm64-v8a, some ship both. If we filter down to a single
+            // ABI at this layer, and any of the sub-dependencies has no
+            // lib for that ABI, the resulting APK ends up with no
+            // native libraries at all — which is exactly the
+            // INSTALL_FAILED_NO_MATCHING_ABIS / res=-113 error we hit
+            // on Homatics Box R 4K Plus.
+            //
+            // The CI workflow passes `flutter build apk --release`
+            // without --target-platform, which produces a fat APK that
+            // works everywhere. It is roughly 2× the size of a
+            // single-ABI APK, but sideload installs just fine and we
+            // can split it later once we know the app runs on TV.
 
             // Do NOT enable code shrinking / resource shrinking for this
             // Flutter app — it breaks media_kit and serious_python
