@@ -84,14 +84,6 @@ jobs:
         # INSTALL_FAILED_NO_MATCHING_ABIS on Homatics Box R 4K Plus.
         run: flutter build apk --release
 
-      - name: Build debug APK (fallback)
-        # Debug APK is signed with Android's universal debug key, which
-        # most TV firmwares trust for sideloading. If the release APK
-        # still triggers "app not compatible", the debug APK usually
-        # installs fine and we can use it to narrow down the root cause.
-        if: always()
-        run: flutter build apk --debug
-
       - name: Inspect final release APK (deep diagnostics)
         if: always()
         run: |
@@ -146,12 +138,4 @@ jobs:
         with:
           name: purevideo-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: warn
-
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: purevideo-debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: warn
