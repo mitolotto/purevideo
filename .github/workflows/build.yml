@@ -90,6 +90,27 @@ jobs:
         # pulling in x86 native assets that most TVs do not need.
         run: flutter build apk --release --target-platform android-arm64
 
+      - name: Dump final APK manifest (for compatibility debugging)
+        # If the device reports "app not compatible", we need to see which
+        # uses-feature or uses-permission the final APK actually carries.
+        # aapt2 comes with the Android SDK build tools already installed
+        # on the GitHub runner.
+        if: always()
+        run: |
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          if [ -f "$APK" ]; then
+            BUILD_TOOLS_DIR=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -n1)
+            AAPT2="$BUILD_TOOLS_DIR/aapt2"
+            echo "=== Using aapt2 from: $AAPT2 ==="
+            echo "=== uses-feature / uses-permission declared in final APK ==="
+            "$AAPT2" dump badging "$APK" | grep -E "uses-feature|uses-permission|sdkVersion|native-code|supports-screens" || true
+            echo ""
+            echo "=== Full final AndroidManifest.xml (first 200 lines) ==="
+            "$AAPT2" dump xmltree "$APK" --file AndroidManifest.xml | head -200 || true
+          else
+            echo "APK not built, skipping manifest dump"
+          fi
+
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
