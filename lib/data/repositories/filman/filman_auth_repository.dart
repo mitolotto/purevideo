@@ -69,34 +69,123 @@ class FilmanAuthRepository implements AuthRepository {
   @override
   Stream<AuthModel> get authStream => _authController.stream;
 
+  /// JavaScript injected into the Filman login WebView.
+  ///
+  /// Logic, in order:
+  ///   1. If we already left `/logowanie` (login succeeded — filman
+  ///      redirects authenticated users to `/`), hand the session
+  ///      cookies back to Dart and we're done.
+  ///   2. Otherwise wait for the `#signin-form` element, fill it,
+  ///      submit it EXACTLY ONCE (using a `window.__pvFilmanState`
+  ///      guard that survives re-injection on navigation).
+  ///   3. After submit has been clicked, and only then, start
+  ///      watching for a `.alert-danger` banner — that's how filman
+  ///      reports CSRF/credentials/captcha problems. Watching for
+  ///      it BEFORE submit was the bug that kept firing
+  ///      "Nieprawidłowy token bezpieczeństwa" on devices where a
+  ///      stale flash message from an earlier attempt was already
+  ///      in the DOM on first page load.
+  ///   4. Hard 20s timeout so we never hang the dialog forever if
+  ///      filman silently redirects somewhere unexpected or the
+  ///      network drops between submit and next navigation.
+  ///
+  /// The script is idempotent. `onLoadStop` fires a second time
+  /// after the login POST redirect, which re-injects this script;
+  /// `__pvFilmanState` makes the second pass a no-op (or picks up
+  /// the error/success path as appropriate) instead of re-filling
+  /// and re-submitting the form, which would either resubmit stale
+  /// credentials or race a fresh CSRF token.
   String _getFilmanLoginScript(String login, String password,
       {String? captcha}) {
+    final captchaLine = captcha != null
+        ? "var rc = document.getElementById('g-recaptcha-response'); if (rc) { rc.value = '$captcha'; }"
+        : "";
     return '''
       (function() {
-        function waitForElement(selector, callback) {
-          const element = document.querySelector(selector);
-          if (element) {
-            callback(element);
-          } else {
-            setTimeout(() => waitForElement(selector, callback), 100);
+        // Shared state across (re-)injections of this script.
+        // Backed by sessionStorage so it survives the full page
+        // navigation after submit (filman redirects to '/' on
+        // success and back to '/logowanie' on failure — both are
+        // separate document loads that re-inject this script from
+        // scratch, so plain `window.__pvFilmanState` would reset).
+        function getState() {
+          try {
+            var raw = sessionStorage.getItem('__pvFilmanState');
+            return raw ? JSON.parse(raw) : { submitted: false, reported: false };
+          } catch (e) {
+            return { submitted: false, reported: false };
           }
         }
+        function setState(s) {
+          try { sessionStorage.setItem('__pvFilmanState', JSON.stringify(s)); } catch (e) {}
+        }
+        var state = getState();
+        var timeoutId = null;
 
-        if (!window.location.href.includes('/logowanie')) {
-          window.flutter_inappwebview.callHandler('messageHandler', JSON.stringify({success: true, cookies: document.cookie}));
+        function report(payload) {
+          if (state.reported) return;
+          state.reported = true;
+          setState(state);
+          if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
+          window.flutter_inappwebview.callHandler('messageHandler', JSON.stringify(payload));
+        }
+
+        function waitForElement(selector, callback, stopFlag) {
+          var check = function() {
+            if (stopFlag && stopFlag()) return;       // cancel when no longer needed
+            if (state.reported) return;               // something already resolved
+            var el = document.querySelector(selector);
+            if (el) { callback(el); return; }
+            setTimeout(check, 100);
+          };
+          check();
+        }
+
+        // Case 1: already redirected away from /logowanie -> login succeeded.
+        // Note: filman redirects to '/' on success, not to a subpath of /logowanie.
+        if (!window.location.pathname.startsWith('/logowanie')) {
+          report({ success: true, cookies: document.cookie });
           return;
         }
 
-        waitForElement('.alert-danger', function(element) {
-          window.flutter_inappwebview.callHandler('messageHandler', JSON.stringify({success: false, error: element.textContent.trim()}));
-        });
+        // Global timeout so the dialog cannot hang forever.
+        timeoutId = setTimeout(function() {
+          report({ success: false, error: 'Przekroczono czas oczekiwania na odpowiedź filman.cc.' });
+        }, 20000);
 
-        waitForElement('#signin-form', function(element) {
-          element.login.value = '$login';
-          element.password.value = '$password';
-          ${captcha != null ? "if (document.getElementById('g-recaptcha-response')) { document.getElementById('g-recaptcha-response').value = '$captcha'; }" : ""}
-          element.querySelector("button[name='submit']").click();
-        });
+        // If we arrived back on /logowanie AFTER clicking submit,
+        // look for the error banner. Only then — before that, any
+        // .alert-danger on the page is a stale flash from an
+        // earlier session and must be ignored.
+        if (state.submitted) {
+          waitForElement('.alert-danger',
+            function(el) { report({ success: false, error: el.textContent.trim() }); },
+            function() { return state.reported; });
+          return;
+        }
+
+        // First pass on /logowanie: fill the form and click submit.
+        // Extra sanity check: Cloudflare's "Just a moment..." challenge
+        // pages can carry their own form-like markup. Require both the
+        // form AND a submit button named "submit" before we consider
+        // ourselves on the real login page.
+        waitForElement('#signin-form button[name=submit]',
+          function(btn) {
+            if (state.submitted) return;
+            var form = document.querySelector('#signin-form');
+            if (!form || !form.login || !form.password) return;  // still not the real form
+            state.submitted = true;
+            setState(state);
+            try {
+              form.login.value = '$login';
+              form.password.value = '$password';
+              $captchaLine
+              btn.click();
+            } catch (e) {
+              report({ success: false, error: 'Nie udało się wypełnić formularza: ' + e });
+            }
+          },
+          function() { return state.reported || state.submitted; });
       })();
     ''';
   }
