@@ -23,7 +23,13 @@ plugins {
     id("com.google.gms.google-services") version("4.3.15") apply false
     id("com.google.firebase.crashlytics") version("2.8.1") apply false
     // END: FlutterFire Configuration
-    id("org.jetbrains.kotlin.android") version "2.1.21" apply false
+    // Bumped to 2.3.21 so the Kotlin compiler matches the stdlib
+    // transitively pulled in by recent plugins (notably
+    // screen_brightness_android-2.1.4, which depends on
+    // kotlin-stdlib-2.3.21). Keeping the compiler on 2.1.x produced:
+    //   "The binary version of kotlin-stdlib is 2.3.21 but the
+    //    compiler version is 2.1.0 - please upgrade the Kotlin plugin."
+    id("org.jetbrains.kotlin.android") version "2.3.21" apply false
 }
 
 include(":app")

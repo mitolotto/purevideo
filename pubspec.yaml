@@ -26,7 +26,11 @@ dependencies:
   media_kit: ^1.2.6
   media_kit_video: ^2.0.1
   media_kit_libs_video: ^1.0.6
-  screen_brightness: ^2.1.3
+  # screen_brightness removed: the package was declared but never
+  # imported anywhere in lib/. Keeping it forced the
+  # screen_brightness_android plugin into the build, which in turn
+  # required Kotlin >= 2.3.0 (kotlin-stdlib-2.3.21). Dropping it keeps
+  # the dep graph lean.
   firebase_core: ^3.15.2
   firebase_analytics: ^11.6.0
   firebase_crashlytics: ^4.3.10
