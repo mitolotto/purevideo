@@ -11,51 +11,40 @@ import 'package:purevideo/di/injection_container.dart';
 /// Resolves raw hoster links (e.g. streamtape.com embed pages) into
 /// direct playable URLs.
 ///
-/// Historical architecture:
-///   The resolver runs inside an embedded CPython interpreter shipped
-///   as `app/app.zip` and started by `serious_python` from `main.dart`.
-///   It's a Flask server on `http://localhost:8080` that wraps the
-///   `libresolveurl` Kodi addon (see `app/temp/main.py` for a copy).
+/// Historical architecture (removed):
+///   Earlier builds shipped an embedded CPython (serious_python) that
+///   ran a Flask server on http://localhost:8080 wrapping the
+///   libresolveurl Kodi addon. That approach never worked on
+///   Android TV (Amlogic libc does not load CPython's _ssl/_hashlib
+///   extensions, and our CI never ran the two-step
+///   `dart run serious_python:main package` build, so
+///   libpythonbundle.so was missing from the APK).
 ///
-/// Problem on Android TV:
-///   1. `serious_python` requires its Python packages to be pre-built
-///      at CI time via `SERIOUS_PYTHON_SITE_PACKAGES`. Our workflow
-///      only `pip install`s `resolver/requirements.txt` — which does
-///      not exist in the repo — so the APK ships an `app.zip` whose
-///      `import flask` fails immediately at startup.
-///   2. Even when the packages are present, several TV firmwares
-///      (Amlogic-based: Homatics, Mecool, …) ship a libc build that
-///      refuses to load CPython's `_ssl` / `_hashlib` extensions,
-///      which also crashes the interpreter before `app.run()` is
-///      called.
-///   3. The user sees `Connection refused` to localhost because the
-///      server was never actually up.
+/// Current architecture:
+///   * serious_python is gone.
+///   * Resolution is delegated to a backend at RESOLVER_BASE_URL,
+///     typically a hosted copy of `app/temp/main.py` (FastAPI) or the
+///     Flask version bundled in `app/app.zip`. Build with:
 ///
-/// Fix:
-///   * Make the base URL configurable at runtime. Set
-///     `RESOLVER_BASE_URL` at compile time to point at a hosted copy
-///     of `main.py` (Fly.io/Render/VPS) — zero changes needed in
-///     source. If the env var is empty the code still tries
-///     localhost:8080, so mobile/debug builds where the embedded
-///     Python does start up keep working.
-///   * Short timeouts so a dead server never blocks the UI for 30s.
-///   * Probe `/health` once per instance; if it's unreachable we skip
-///     the POST entirely and emit an "unresolved" VideoSource list so
-///     the player can fall back to the raw embed URL via media_kit.
-///     That is enough for hosters that don't obfuscate the direct
-///     link (a surprisingly large set — Doodstream, Streamtape's
-///     plain CDN, Mixdrop mirrors, etc.).
+///       flutter build apk --release \
+///         --dart-define=RESOLVER_BASE_URL=https://your.host
+///
+///   * If RESOLVER_BASE_URL is empty (default) or the backend is
+///     unreachable, we do NOT fail: we wrap the raw hoster URLs as
+///     VideoSource objects with a Referer header and let media_kit
+///     try them directly. This works for hosters that don't obfuscate
+///     the stream URL (Doodstream, plain Streamtape CDN, some
+///     Mixdrop mirrors) and, crucially, replaces "Nie znaleziono
+///     źródeł odtwarzania" with an actual attempt at playback.
 class ResolveUrlService {
   final Dio _dio;
 
-  /// Base URL of the resolver backend. Keeps the legacy default so
-  /// devices that DO have a working embedded Python still work.
-  /// Override in builds via:
-  ///   flutter build apk --release \
-  ///     --dart-define=RESOLVER_BASE_URL=https://resolver.example.com
+  /// Base URL of the resolver backend. Empty by default so freshly
+  /// installed APKs immediately use the raw-URL fallback instead of
+  /// hanging on a non-existent localhost server.
   String serverUrl = const String.fromEnvironment(
     'RESOLVER_BASE_URL',
-    defaultValue: 'http://localhost:8080',
+    defaultValue: '',
   );
 
   /// Cached result of the last `/health` probe. `null` means we
@@ -67,6 +56,10 @@ class ResolveUrlService {
   ResolveUrlService(this._dio);
 
   Future<bool> _probeHealth() async {
+    // No backend configured at build time -> never probe, just use
+    // the raw-URL fallback. This also makes debug builds on a laptop
+    // work out of the box without any --dart-define.
+    if (serverUrl.isEmpty) return false;
     if (_serverAvailable != null) return _serverAvailable!;
     try {
       final response = await _dio.get(

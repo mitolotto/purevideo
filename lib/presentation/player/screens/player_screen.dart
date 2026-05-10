@@ -632,7 +632,16 @@ class _QualityButton extends StatelessWidget {
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       child: TvFocusable(
-                        autofocus: i == 0,
+                        // Autofocus the currently selected source
+                        // when the dialog opens. Using `i == 0`
+                        // previously meant D-pad focus snapped back
+                        // to item #0 every time the user re-opened
+                        // the list, visually "undoing" any earlier
+                        // selection. Fall back to item #0 only if
+                        // no source is selected yet (first open).
+                        autofocus: state.selectedSource != null
+                            ? state.videoSources![i] == state.selectedSource
+                            : i == 0,
                         borderRadius: BorderRadius.circular(10),
                         onTap: () => Navigator.of(ctx)
                             .pop(state.videoSources![i]),
