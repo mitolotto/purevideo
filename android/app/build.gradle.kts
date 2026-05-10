@@ -34,8 +34,15 @@ android {
 
     defaultConfig {
         applicationId = "io.github.majusss.purevideo"
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        // Min SDK 21 (Android 5.0) is the minimum for the Leanback
+        // launcher to recognize the app as an Android TV app.
+        minSdk = maxOf(flutter.minSdkVersion, 21)
+        // Pin targetSdk to 34 (Android 14) — same level as our target TV
+        // (Homatics Box R 4K Plus runs Android TV 14). Using a higher
+        // targetSdk than the device can cause "app not compatible" on
+        // some Android TV installs because the Package Manager enforces
+        // behavioral changes that may not be available on the device.
+        targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }

@@ -2,14 +2,39 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Android TV / Leanback declarations -->
+    <!--
+        LEANBACK is marked required=false. Counter-intuitively, setting it
+        to required=true is what causes "App not compatible" errors on
+        some Android TV boxes (including Homatics). Those devices don't
+        expose android.software.leanback at the strict level required by
+        the Package Manager, so the APK gets filtered out. Setting it to
+        false plus adding the LEANBACK_LAUNCHER intent filter is the
+        correct combination: launcher still displays the app on Android
+        TV homescreens, and compatibility checks no longer block install.
+    -->
     <uses-feature
         android:name="android.software.leanback"
-        android:required="true" />
+        android:required="false" />
     <uses-feature
         android:name="android.hardware.touchscreen"
         android:required="false" />
     <uses-feature
+        android:name="android.hardware.touchscreen.multitouch"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.touchscreen.multitouch.distinct"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.touchscreen.multitouch.jazzhand"
+        android:required="false" />
+    <uses-feature
         android:name="android.hardware.faketouch"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.faketouch.multitouch.distinct"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.faketouch.multitouch.jazzhand"
         android:required="false" />
 
     <!--
@@ -79,7 +104,8 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:banner="@drawable/tv_banner"
-        android:isGame="false">
+        android:isGame="false"
+        android:appCategory="video">
         <activity
             android:name="com.ryanheise.audioservice.AudioServiceActivity"
             android:exported="true"
