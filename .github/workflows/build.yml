@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - master
+  # Allow manual triggering from the Actions tab, useful for re-running
+  # a build without pushing a new commit.
+  workflow_dispatch:
 
 jobs:
   android-build:
@@ -13,9 +16,12 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-
-      - name: Pull Latest Changes
-        run: git pull origin master
+        with:
+          # Full history so later steps that inspect tags/commits work.
+          # The previous `git pull` step (which was failing with exit 128)
+          # is no longer needed because checkout already gives us the
+          # correct ref.
+          fetch-depth: 0
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -31,56 +37,43 @@ jobs:
       - name: Get Dependencies
         run: flutter pub get
 
-      - name: Decode Keystore
+      - name: Generate keystore or decode from secret
+        # If the KEYSTORE_BASE64 secret is configured, use the real
+        # keystore from it (Play Store-ready signing). Otherwise create
+        # a local keystore on the fly so the release build can still be
+        # signed. The resulting APK installs perfectly on Android TV for
+        # sideloading, it just cannot be uploaded to the Play Store.
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/keystore.jks
-
-      - name: Create key.properties
-        run: |
-          echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" > android/key.properties
-          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/key.properties
-          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/key.properties
-          echo "storeFile=keystore.jks" >> android/key.properties
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "Using keystore from KEYSTORE_BASE64 secret"
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/keystore.jks
+            echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" > android/key.properties
+            echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/key.properties
+            echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/key.properties
+            echo "storeFile=keystore.jks" >> android/key.properties
+          else
+            echo "No keystore secret found, generating a local keystore"
+            keytool -genkey -v \
+              -keystore android/app/keystore.jks \
+              -alias purevideo \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass purevideo -keypass purevideo \
+              -dname "CN=PureVideo, OU=Dev, O=PureVideo, L=NA, ST=NA, C=PL"
+            echo "storePassword=purevideo" > android/key.properties
+            echo "keyPassword=purevideo" >> android/key.properties
+            echo "keyAlias=purevideo" >> android/key.properties
+            echo "storeFile=keystore.jks" >> android/key.properties
+          fi
 
       - name: Build APK
-        run: flutter build apk --release
+        # Build only for arm64 — this is the architecture used by every
+        # modern Android TV stick, TV box and TV itself, and avoids
+        # pulling in x86 native assets that most TVs do not need.
+        run: flutter build apk --release --target-platform android-arm64
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: purevideo-release.apk
+          name: purevideo-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-
-  # ios-build:
-  #   name: Build iOS IPA
-  #   runs-on: macos-latest
-
-  #   steps:
-  #     - name: Checkout Repository
-  #       uses: actions/checkout@v4
-
-  #     - name: Pull Latest Changes
-  #       run: git pull origin master
-
-  #     - name: Set up Flutter
-  #       uses: subosito/flutter-action@v2
-  #       with:
-  #         flutter-version: 3.32.6
-
-  #     - name: Get Dependencies
-  #       run: flutter pub get
-
-  #     - name: Build iOS IPA
-  #       run: flutter build ios --release --no-codesign
-
-  #     - name: Create IPA File
-  #       run: |
-  #         mkdir -p Payload
-  #         mv build/ios/iphoneos/Runner.app Payload/
-  #         zip -qq -r -9 purevideo-release.ipa Payload
-
-  #     - name: Upload IPA Artifact
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: purevideo-release.ipa
-  #         path: purevideo-release.ipa
+          if-no-files-found: error
