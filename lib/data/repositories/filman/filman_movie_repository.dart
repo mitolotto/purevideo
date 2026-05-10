@@ -99,31 +99,55 @@ class FilmanMovieRepository implements MovieRepository {
       dom.Document document) async {
     final videoUrls = <HostLink>[];
 
-    for (final row in document.querySelectorAll('tbody tr')) {
+    // Counters so a single debug line at the end tells us exactly
+    // why the list came back empty instead of us having to guess
+    // between "wrong response type", "selector obsolete",
+    // "a[data-iframe] base64 broken", or "tmp-url.pro unresolved".
+    final rows = document.querySelectorAll('tbody tr');
+    int rowsWithIframeAttr = 0;
+    int rowsDecodedOk = 0;
+    int rowsTooFewCells = 0;
+    int rowsTmpUrlResolved = 0;
+    int rowsTmpUrlEmpty = 0;
+
+    for (final row in rows) {
       String? link;
 
+      final iframeAttr =
+          row.querySelector('a[data-iframe]')?.attributes['data-iframe'];
+      if (iframeAttr != null && iframeAttr.isNotEmpty) rowsWithIframeAttr++;
+
       try {
-        final decoded = base64Decode(
-            row.querySelector('a[data-iframe]')?.attributes['data-iframe'] ??
-                '');
+        final decoded = base64Decode(iframeAttr ?? '');
         link = (utf8.decode(decoded));
       } catch (e) {
         debugPrint(
-            'Failed to decode link: ${row.querySelector('a[data-iframe]')?.attributes['data-iframe']} - ${e.toString()}');
+            'Failed to decode link: $iframeAttr - ${e.toString()}');
         link = null;
       }
 
       if (link == null || link.isEmpty == true) continue;
+      rowsDecodedOk++;
 
       if (link.contains('tmp-url.pro')) {
         link = await _resolveTempUrl(link);
+        if (link.isEmpty) {
+          rowsTmpUrlEmpty++;
+        } else {
+          rowsTmpUrlResolved++;
+        }
         debugPrint('Resolved temp URL to: $link');
       }
 
       final tableData = row.querySelectorAll('td');
-      if (tableData.length < 3) continue;
+      if (tableData.length < 3) {
+        rowsTooFewCells++;
+        continue;
+      }
       final language = tableData[1].text.trim();
       final qualityVersion = tableData[2].text.trim();
+
+      if (link.isEmpty) continue;
 
       videoUrls.add(HostLink(
         url: link,
@@ -132,7 +156,49 @@ class FilmanMovieRepository implements MovieRepository {
       ));
     }
 
+    if (videoUrls.isEmpty) {
+      // One concise log line that tells us which stage dropped the
+      // links. Follow-up call (movie details) dumps a body snippet
+      // so we don't chase around which part of the pipeline broke.
+      debugPrint('filman: _extractHostLinks came back empty — '
+          'rows=${rows.length} '
+          'withIframeAttr=$rowsWithIframeAttr '
+          'decodedOk=$rowsDecodedOk '
+          'tooFewCells=$rowsTooFewCells '
+          'tmpUrlResolved=$rowsTmpUrlResolved '
+          'tmpUrlEmpty=$rowsTmpUrlEmpty');
+    }
+
     return videoUrls;
+  }
+
+  /// Shape of the HTML returned from a filman.cc movie/episode page.
+  /// Used only when scraping comes back empty, so the runtime log
+  /// tells us whether the page actually looks like a logged-in movie
+  /// page, a Cloudflare challenge, a login redirect, or a premium
+  /// gate. Keeps body snippet short so logcat doesn't truncate it.
+  void _debugResponse(String label, Response response) {
+    final body = response.data?.toString() ?? '';
+    final snippet = body.length > 800 ? body.substring(0, 800) : body;
+    final cookieHdr =
+        (response.requestOptions.headers['Cookie'] as String?) ?? '';
+    final cookieNames = cookieHdr
+        .split(';')
+        .map((c) => c.trim().split('=').first)
+        .where((s) => s.isNotEmpty)
+        .toList();
+    debugPrint('filman: $label '
+        'status=${response.statusCode} '
+        'location=${response.headers.map['location']} '
+        'contentType=${response.headers.value('content-type')} '
+        'bodyLen=${body.length} '
+        'hasCloudflare=${body.contains('Just a moment')} '
+        'hasLoginForm=${body.contains('#signin-form') || body.contains('id="signin-form"')} '
+        'hasPremiumGate=${body.contains('premium') || body.contains('Premium')} '
+        'hasTbody=${body.contains('<tbody')} '
+        'hasDataIframe=${body.contains('data-iframe')} '
+        'cookieNamesSent=$cookieNames '
+        'bodyHead=${snippet.replaceAll('\n', ' ').replaceAll('\r', '')}');
   }
 
   @override
@@ -184,6 +250,10 @@ class FilmanMovieRepository implements MovieRepository {
     final document = html.parse(response.data);
 
     final hostLinks = await _extractHostLinksFromDocument(document);
+
+    if (hostLinks.isEmpty) {
+      _debugResponse('scrapeEpisodeVideoUrls empty for $episodeUrl', response);
+    }
 
     return hostLinks;
   }
@@ -257,6 +327,10 @@ class FilmanMovieRepository implements MovieRepository {
     }
 
     final videoUrls = await _extractHostLinksFromDocument(document);
+
+    if (videoUrls.isEmpty) {
+      _debugResponse('getMovieDetails empty for $url', response);
+    }
 
     final movieModel = ServiceMovieDetailsModel(
       service: SupportedService.filman,
