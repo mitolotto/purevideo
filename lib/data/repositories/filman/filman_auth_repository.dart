@@ -111,9 +111,9 @@ class FilmanAuthRepository implements AuthRepository {
         function getState() {
           try {
             var raw = sessionStorage.getItem('__pvFilmanState');
-            return raw ? JSON.parse(raw) : { submitted: false, reported: false };
+            return raw ? JSON.parse(raw) : { submitted: false, reported: false, preSnap: null };
           } catch (e) {
-            return { submitted: false, reported: false };
+            return { submitted: false, reported: false, preSnap: null };
           }
         }
         function setState(s) {
@@ -122,11 +122,50 @@ class FilmanAuthRepository implements AuthRepository {
         var state = getState();
         var timeoutId = null;
 
+        // Snapshot the login form so that when the server rejects us
+        // with "Nieprawidłowy token bezpieczeństwa" we can see in the
+        // log what the form actually contained (hidden CSRF inputs,
+        // Turnstile widget, reCAPTCHA, etc.). This is purely diagnostic.
+        function snapshotForm() {
+          try {
+            var form = document.querySelector('#signin-form');
+            var hidden = [];
+            if (form) {
+              var inputs = form.querySelectorAll('input[type=hidden]');
+              for (var i = 0; i < inputs.length; i++) {
+                var n = inputs[i].name || '(noname)';
+                var v = inputs[i].value || '';
+                hidden.push(n + '=' + (v ? '[' + v.length + ']' : 'empty'));
+              }
+            }
+            return {
+              url: window.location.href,
+              pathname: window.location.pathname,
+              hasForm: !!form,
+              action: form ? form.getAttribute('action') : null,
+              method: form ? form.getAttribute('method') : null,
+              hiddenInputs: hidden,
+              hasTurnstile: !!document.querySelector('.cf-turnstile, [data-sitekey][class*=turnstile], iframe[src*=challenges.cloudflare]'),
+              hasRecaptcha: !!document.querySelector('.g-recaptcha, iframe[src*=recaptcha]'),
+              cookieNames: (document.cookie || '').split(';').map(function(c){return c.trim().split('=')[0];}).filter(Boolean),
+              title: document.title
+            };
+          } catch (e) {
+            return { snapshotError: String(e) };
+          }
+        }
+
         function report(payload) {
           if (state.reported) return;
           state.reported = true;
           setState(state);
           if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
+          // Attach the pre-submit snapshot to every non-success report so
+          // the cause of server-side rejection (e.g. missing Turnstile
+          // token, stale CSRF) is visible in the log next to the error.
+          if (payload && payload.success !== true) {
+            payload.debug = { preSubmit: state.preSnap, postSubmit: snapshotForm() };
+          }
           window.flutter_inappwebview.callHandler('messageHandler', JSON.stringify(payload));
         }
 
@@ -174,6 +213,8 @@ class FilmanAuthRepository implements AuthRepository {
             if (state.submitted) return;
             var form = document.querySelector('#signin-form');
             if (!form || !form.login || !form.password) return;  // still not the real form
+            // Capture a snapshot BEFORE we mutate/submit the form.
+            state.preSnap = snapshotForm();
             state.submitted = true;
             setState(state);
             try {
@@ -223,10 +264,20 @@ class FilmanAuthRepository implements AuthRepository {
           _authController.add(authModel);
           return authModel;
         } else {
+          final errorText = json['error'] ?? 'Nieznany błąd logowania $webviewLogin';
+          // When the server rejects us (wrong token, wrong credentials,
+          // Turnstile missing, etc.) the JS snapshot in json['debug']
+          // tells us what the form actually looked like. Surface it so
+          // the runtime log is enough to diagnose next failure without
+          // another rebuild cycle.
+          final debug = json['debug'];
           final authModel = AuthModel(
             service: SupportedService.filman,
             success: false,
-            error: [json['error'] ?? 'Nieznany błąd logowania $webviewLogin'],
+            error: [
+              errorText,
+              if (debug != null) 'debug: ${jsonEncode(debug)}',
+            ],
           );
           _authController.add(authModel);
           return authModel;
