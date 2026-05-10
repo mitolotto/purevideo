@@ -10,6 +10,7 @@ import 'package:purevideo/presentation/movie_details/bloc/movie_details_bloc.dar
 import 'package:purevideo/presentation/movie_details/bloc/movie_details_event.dart';
 import 'package:purevideo/presentation/movie_details/bloc/movie_details_state.dart';
 import 'package:purevideo/presentation/global/widgets/error_view.dart';
+import 'package:purevideo/presentation/global/widgets/tv_focusable.dart';
 import 'package:fast_cached_network_image/fast_cached_network_image.dart';
 
 class MovieDetailsScreen extends StatelessWidget {
@@ -286,8 +287,13 @@ class _MovieDetailsViewState extends State<MovieDetailsView> {
     final textTheme = Theme.of(context).textTheme;
     final movie = state.movie!;
 
-    return FilledButton.icon(
-      onPressed: () {
+    // On TV the play button is the primary entry point of the screen, so
+    // it autofocuses as soon as the details are loaded.
+    return TvFocusable(
+      autofocus: state.isLoaded,
+      borderRadius: BorderRadius.circular(12),
+      focusScale: 1.04,
+      onTap: () {
         if (!state.isLoaded) {
           return;
         }
@@ -311,16 +317,30 @@ class _MovieDetailsViewState extends State<MovieDetailsView> {
           );
         }
       },
-      icon: state.isLoaded
-          ? const Icon(Icons.play_arrow)
-          : const Icon(Icons.refresh),
-      label: state.isLoaded
-          ? Text(watchedText(state))
-          : const Text('Wczytywanie...'),
-      style: FilledButton.styleFrom(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        minimumSize: const Size(double.infinity, 0),
-        textStyle: textTheme.titleMedium,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.primary,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              state.isLoaded ? Icons.play_arrow : Icons.refresh,
+              color: Theme.of(context).colorScheme.onPrimary,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              state.isLoaded ? watchedText(state) : 'Wczytywanie...',
+              style: textTheme.titleMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onPrimary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -418,23 +438,9 @@ class _MovieDetailsViewState extends State<MovieDetailsView> {
           ),
           itemBuilder: (context, index) {
             final episode = state.episodes[index];
-            return ListTile(
-              contentPadding: const EdgeInsets.symmetric(
-                vertical: 4,
-                horizontal: 0,
-              ),
-              leading: CircleAvatar(
-                backgroundColor: colorScheme.secondaryContainer,
-                child: Text(
-                  episode.number.toString(),
-                  style: textTheme.bodyMedium
-                      ?.copyWith(color: colorScheme.onSecondaryContainer),
-                ),
-              ),
-              title: Text(
-                episode.title,
-                style: textTheme.bodyLarge,
-              ),
+            return TvFocusable(
+              focusScale: 1.02,
+              borderRadius: BorderRadius.circular(8),
               onTap: () {
                 context.pushNamed(
                   'player',
@@ -445,6 +451,31 @@ class _MovieDetailsViewState extends State<MovieDetailsView> {
                   },
                 );
               },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  vertical: 10,
+                  horizontal: 8,
+                ),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: colorScheme.secondaryContainer,
+                      child: Text(
+                        episode.number.toString(),
+                        style: textTheme.bodyMedium?.copyWith(
+                            color: colorScheme.onSecondaryContainer),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Text(
+                        episode.title,
+                        style: textTheme.bodyLarge,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             );
           },
         ),

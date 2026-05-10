@@ -5,6 +5,8 @@ import 'package:purevideo/core/utils/supported_enum.dart';
 import 'package:purevideo/di/injection_container.dart';
 import 'package:purevideo/presentation/accounts/bloc/accounts_bloc.dart';
 import 'package:purevideo/presentation/accounts/bloc/accounts_event.dart';
+import 'package:purevideo/presentation/global/widgets/tv_focusable.dart';
+import 'package:purevideo/presentation/global/widgets/tv_text_field.dart';
 import 'package:go_router/go_router.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -48,37 +50,84 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text('Logowanie do ${widget.service.displayName}')),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              ..._buildFormFields(),
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: _handleSubmit,
-                child: const Text('Zaloguj'),
-              ),
-              if (widget.service.canBeAnonymous) ...[
-                const SizedBox(height: 16),
-                OutlinedButton(
-                  onPressed: () {
-                    context.read<AccountsBloc>().add(
-                          SignInRequested(
-                            service: widget.service,
-                            fields: {'anonymous': 'true'},
+      body: Center(
+        child: ConstrainedBox(
+          // TV: limit form width so fields remain comfortable at 1080p.
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Form(
+              key: _formKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    ..._buildFormFields(),
+                    const SizedBox(height: 24),
+                    TvFocusable(
+                      borderRadius: BorderRadius.circular(12),
+                      focusScale: 1.04,
+                      onTap: _handleSubmit,
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primary,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          'Zaloguj',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onPrimary,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
                           ),
-                        );
-                    if (context.canPop()) {
-                      context.pop();
-                    }
-                  },
-                  child: const Text('Zaloguj jako gość'),
+                        ),
+                      ),
+                    ),
+                    if (widget.service.canBeAnonymous) ...[
+                      const SizedBox(height: 16),
+                      TvFocusable(
+                        borderRadius: BorderRadius.circular(12),
+                        focusScale: 1.04,
+                        onTap: () {
+                          context.read<AccountsBloc>().add(
+                                SignInRequested(
+                                  service: widget.service,
+                                  fields: {'anonymous': 'true'},
+                                ),
+                              );
+                          if (context.canPop()) {
+                            context.pop();
+                          }
+                        },
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Theme.of(context).colorScheme.primary,
+                              width: 2,
+                            ),
+                          ),
+                          child: Text(
+                            'Zaloguj jako gość',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.primary,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ]
+                  ],
                 ),
-              ]
-            ],
+              ),
+            ),
           ),
         ),
       ),
@@ -87,6 +136,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   List<Widget> _buildFormFields() {
     List<Widget> formFields = [];
+    bool firstTextField = true;
     for (var fieldMap in widget.service.loginRequiredFields) {
       fieldMap.forEach((fieldName, inputType) {
         if (inputType == InputType.recaptcha) {
@@ -103,8 +153,10 @@ class _LoginScreenState extends State<LoginScreen> {
                         Text('Captcha zweryfikowana'),
                       ],
                     ))
-                  : ElevatedButton(
-                      onPressed: () async {
+                  : TvFocusable(
+                      borderRadius: BorderRadius.circular(12),
+                      focusScale: 1.04,
+                      onTap: () async {
                         final token = await getIt<CaptchaService>().getToken(
                             widget.service.loginCaptchaConfig,
                             widget.service.baseUrl);
@@ -117,23 +169,42 @@ class _LoginScreenState extends State<LoginScreen> {
                           _fieldValues[fieldName] = token;
                         });
                       },
-                      child: const Text('Weryfikuj Captcha'),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .secondaryContainer,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          'Weryfikuj Captcha',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSecondaryContainer,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
                     ),
             ),
           );
         } else {
+          final isFirst = firstTextField;
+          firstTextField = false;
           formFields.add(
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8.0),
-              child: TextFormField(
+              child: TvTextField(
                 controller: _controllers[fieldName],
-                decoration: InputDecoration(
-                  labelText: fieldName
-                      .replaceAllMapped(
-                          RegExp(r'([A-Z])'), (match) => ' ${match.group(1)}')
-                      .replaceFirst(fieldName[0], fieldName[0].toUpperCase()),
-                  border: const OutlineInputBorder(),
-                ),
+                autofocus: isFirst,
+                labelText: fieldName
+                    .replaceAllMapped(
+                        RegExp(r'([A-Z])'), (match) => ' ${match.group(1)}')
+                    .replaceFirst(fieldName[0], fieldName[0].toUpperCase()),
                 obscureText: inputType == InputType.password,
                 keyboardType: inputType == InputType.text &&
                         (fieldName.toLowerCase().contains('email') ||

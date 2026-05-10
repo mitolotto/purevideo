@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:purevideo/presentation/global/widgets/tv_focusable.dart';
 
 class SettingsItem extends StatelessWidget {
   final IconData icon;
@@ -6,6 +7,7 @@ class SettingsItem extends StatelessWidget {
   final String subtitle;
   final VoidCallback onTap;
   final Widget? trailing;
+  final bool autofocus;
 
   const SettingsItem({
     super.key,
@@ -14,52 +16,50 @@ class SettingsItem extends StatelessWidget {
     required this.subtitle,
     required this.onTap,
     this.trailing,
+    this.autofocus = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          color: Colors.transparent,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Icon(icon, color: Theme.of(context).colorScheme.primary),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(title,
-                          style: Theme.of(context).textTheme.titleMedium),
-                      const SizedBox(height: 4),
-                      Text(
-                        subtitle,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurface.withAlpha(153),
-                            ),
-                      ),
-                    ],
+    return TvFocusable(
+      onTap: onTap,
+      autofocus: autofocus,
+      focusScale: 1.02,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Icon(icon, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSurface.withAlpha(153),
+                        ),
                   ),
-                ),
-                if (trailing != null) ...[
-                  const SizedBox(width: 16),
-                  trailing!,
-                ] else
-                  Icon(
-                    Icons.chevron_right,
-                    color:
-                        Theme.of(context).colorScheme.onSurface.withAlpha(153),
-                  ),
-              ],
+                ],
+              ),
             ),
-          ),
+            if (trailing != null) ...[
+              const SizedBox(width: 16),
+              trailing!,
+            ] else
+              Icon(
+                Icons.chevron_right,
+                color:
+                    Theme.of(context).colorScheme.onSurface.withAlpha(153),
+              ),
+          ],
         ),
       ),
     );

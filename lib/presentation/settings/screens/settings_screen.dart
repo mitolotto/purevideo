@@ -30,6 +30,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 icon: Icons.person_outline,
                 title: 'Zarządzanie kontami',
                 subtitle: 'Dodaj lub usuń konta serwisów',
+                autofocus: true,
                 onTap: () => context.pushNamed('accounts'),
               ),
             ],
