@@ -48,6 +48,21 @@ android {
         targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // Restrict native libraries to the two ABIs actually shipped
+        // by every Android TV device we care about (Homatics Box R 4K
+        // Plus, Chromecast with Google TV, Nvidia Shield, etc.).
+        //
+        // WARNING: if a native plugin (media_kit / serious_python /
+        // libflutter.so) happens to ship only one of these ABIs and
+        // not the other, Gradle may end up with an empty lib/<abi>
+        // directory, reproducing the INSTALL_FAILED_NO_MATCHING_ABIS
+        // error we hit before. If that happens, drop armeabi-v7a and
+        // keep arm64-v8a only (every modern TV box is 64-bit).
+        ndk {
+            abiFilters.clear()
+            abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
+        }
     }
 
     signingConfigs {
@@ -74,22 +89,13 @@ android {
                 signingConfig = signingConfigs.getByName("release")
             }
 
-            // NOTE: No abiFilters here. We want Gradle to ship whichever
-            // ABIs each native library (libmpv from media_kit, libpython
-            // from serious_python, libflutter.so, etc.) provides. Some
-            // of them ship only armeabi-v7a binaries, some only
-            // arm64-v8a, some ship both. If we filter down to a single
-            // ABI at this layer, and any of the sub-dependencies has no
-            // lib for that ABI, the resulting APK ends up with no
-            // native libraries at all — which is exactly the
-            // INSTALL_FAILED_NO_MATCHING_ABIS / res=-113 error we hit
-            // on Homatics Box R 4K Plus.
-            //
-            // The CI workflow passes `flutter build apk --release`
-            // without --target-platform, which produces a fat APK that
-            // works everywhere. It is roughly 2× the size of a
-            // single-ABI APK, but sideload installs just fine and we
-            // can split it later once we know the app runs on TV.
+            // ABI set is controlled via defaultConfig.ndk.abiFilters
+            // above (arm64-v8a + armeabi-v7a). We don't also pass
+            // --target-platform in CI, so Gradle produces a fat APK
+            // filtered down to just those two ABIs. If this ever
+            // regresses to INSTALL_FAILED_NO_MATCHING_ABIS on a target
+            // device, drop armeabi-v7a first — every Android TV box we
+            // care about is 64-bit.
 
             // Do NOT enable code shrinking / resource shrinking for this
             // Flutter app — it breaks media_kit and serious_python
