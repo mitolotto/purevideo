@@ -1,5 +1,6 @@
 import java.util.Properties
 import java.io.FileInputStream
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
@@ -26,10 +27,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
-    }
-
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_11.toString()
     }
 
     defaultConfig {
@@ -132,4 +129,14 @@ android {
 
 flutter {
     source = "../.."
+}
+
+// Kotlin 2.3 removed the legacy `android.kotlinOptions { jvmTarget = "11" }`
+// DSL (string-typed). New DSL is the top-level `kotlin { compilerOptions }`
+// extension from the Kotlin Gradle plugin, using a strongly typed
+// JvmTarget enum. See https://kotl.in/u1r8ln
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_11)
+    }
 }
