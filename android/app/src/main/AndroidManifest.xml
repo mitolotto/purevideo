@@ -106,6 +106,24 @@
         android:banner="@drawable/tv_banner"
         android:isGame="false"
         android:appCategory="video">
+        <!--
+            Disable Flutter's Impeller renderer on Android.
+
+            Flutter 3.29+ ships Impeller (Vulkan-based) as the default
+            Android renderer. On Amlogic-based Android TV boxes the
+            Vulkan driver is well known to be incomplete/misbehaving,
+            which manifests as severe playback choppiness (1s of video
+            takes 2–3s to render) and repeated "Skipped N frames" log
+            entries even during idle UI. Disabling Impeller falls back
+            to Skia/OpenGL ES, which works reliably on these devices.
+
+            If this is ever flipped back to true, verify on Homatics
+            Box R 4K Plus first — that was the baseline device where
+            this regression was observed.
+        -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="false" />
         <activity
             android:name="com.ryanheise.audioservice.AudioServiceActivity"
             android:exported="true"

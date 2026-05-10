@@ -96,7 +96,32 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
 
   void _initMediaKit() {
     _player = Player();
-    _controller = VideoController(_player);
+    // Force hardware-accelerated decoding via Android MediaCodec.
+    //
+    // On Android TV boxes (Homatics Box R 4K Plus / Amlogic S905X4)
+    // the media_kit default of `hwdec: 'auto-safe'` falls back to
+    // software decoding, which tops out around 480p on 1080p streams
+    // (observed: 1s of video rendering in 2–3s real time, CPU at ~60°C).
+    // Setting hwdec explicitly to `mediacodec` pins libmpv to the
+    // Android framework's hardware decoder, which uses the SoC's
+    // built-in VPU instead of the CPU.
+    //
+    // `mediacodec` (zero-copy) is preferred over `mediacodec-copy`
+    // because it hands the decoded frames directly to the video
+    // surface without a CPU bounce. On this class of hardware the
+    // VPU is very good at H.264/HEVC 1080p and the copy path would
+    // re-introduce the CPU bottleneck we are trying to avoid.
+    //
+    // If a specific stream ever fails to open with this setting,
+    // the fallback is to switch to 'mediacodec-copy' or drop back
+    // to 'auto-safe' — but do NOT disable hardware decoding wholesale
+    // (the media_kit docs literally warn "THE BATTERY WILL DRAIN").
+    _controller = VideoController(
+      _player,
+      configuration: const VideoControllerConfiguration(
+        hwdec: 'mediacodec',
+      ),
+    );
 
     _positionSubscription = _player.stream.position.listen((position) {
       add(UpdatePosition(position: position));
