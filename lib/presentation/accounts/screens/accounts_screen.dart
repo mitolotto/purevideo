@@ -8,6 +8,7 @@ import 'package:purevideo/presentation/accounts/bloc/accounts_bloc.dart';
 import 'package:purevideo/presentation/accounts/bloc/accounts_event.dart';
 import 'package:purevideo/presentation/accounts/bloc/accounts_state.dart';
 import 'package:purevideo/presentation/global/widgets/error_view.dart';
+import 'package:purevideo/presentation/global/widgets/tv_focusable.dart';
 import 'package:go_router/go_router.dart';
 
 class AccountsScreen extends StatelessWidget {
@@ -39,12 +40,16 @@ class AccountsScreen extends StatelessWidget {
 
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 12),
-                        child: GestureDetector(
+                        child: TvFocusable(
+                          autofocus: index == 0,
+                          focusScale: 1.02,
+                          borderRadius: BorderRadius.circular(12),
                           onTap: () => context.pushNamed(
                             'login',
                             pathParameters: {'service': service.name},
                           ),
                           child: Card(
+                            margin: EdgeInsets.zero,
                             child: ListTile(
                               leading: SizedBox(
                                 width: 32,

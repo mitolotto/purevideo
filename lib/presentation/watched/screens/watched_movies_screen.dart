@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:purevideo/core/services/watched_service.dart';
 import 'package:purevideo/di/injection_container.dart';
 import 'package:purevideo/data/models/movie_model.dart';
+import 'package:purevideo/presentation/global/widgets/tv_focusable.dart';
 import 'package:go_router/go_router.dart';
 
 class WatchedMoviesScreen extends StatefulWidget {
@@ -14,33 +15,34 @@ class WatchedMoviesScreen extends StatefulWidget {
 
 class MovieListItem extends StatelessWidget {
   final MovieModel movie;
+  final bool autofocus;
 
-  const MovieListItem({super.key, required this.movie});
+  const MovieListItem({super.key, required this.movie, this.autofocus = false});
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return TvFocusable(
+      autofocus: autofocus,
+      borderRadius: BorderRadius.circular(12),
+      focusScale: 1.12,
       onTap: () => context.pushNamed('movie_details',
           pathParameters: {
             'title': movie.title,
           },
           extra: movie),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: FastCachedImage(
-          url: movie.imageUrl,
-          headers: movie.imageHeaders,
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) => Container(
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(
-              Icons.movie,
-              color: Theme.of(context).colorScheme.primary,
-              size: 40,
-            ),
+      child: FastCachedImage(
+        url: movie.imageUrl,
+        headers: movie.imageHeaders,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            Icons.movie,
+            color: Theme.of(context).colorScheme.primary,
+            size: 40,
           ),
         ),
       ),
@@ -88,32 +90,30 @@ class _WatchedMoviesScreenState extends State<WatchedMoviesScreen> {
                   ))
               .toList();
 
-          return RefreshIndicator(
-            onRefresh: () async {
-              setState(() {});
-            },
-            child: CustomScrollView(
-              slivers: [
-                SliverPadding(
-                  padding: const EdgeInsets.all(8),
-                  sliver: SliverGrid(
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 3,
-                      childAspectRatio: 0.67,
-                      crossAxisSpacing: 8,
-                      mainAxisSpacing: 8,
-                    ),
-                    delegate: SliverChildBuilderDelegate(
-                      (context, index) {
-                        return MovieListItem(movie: movies[index]);
-                      },
-                      childCount: movies.length,
-                    ),
+          return CustomScrollView(
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(32, 24, 32, 24),
+                sliver: SliverGrid(
+                  gridDelegate:
+                      const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 6,
+                    childAspectRatio: 2 / 3,
+                    crossAxisSpacing: 20,
+                    mainAxisSpacing: 20,
+                  ),
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                      return MovieListItem(
+                        movie: movies[index],
+                        autofocus: index == 0,
+                      );
+                    },
+                    childCount: movies.length,
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           );
         },
       ),

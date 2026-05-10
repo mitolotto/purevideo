@@ -1,6 +1,7 @@
 import 'package:fast_cached_network_image/fast_cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:purevideo/presentation/global/widgets/tv_focusable.dart';
 import 'package:purevideo/presentation/movies/bloc/movies_bloc.dart';
 import 'package:purevideo/presentation/movies/bloc/movies_event.dart';
 import 'package:purevideo/presentation/movies/bloc/movies_state.dart';
@@ -17,33 +18,34 @@ class HomeScreen extends StatefulWidget {
 
 class MovieListItem extends StatelessWidget {
   final MovieModel movie;
+  final bool autofocus;
 
-  const MovieListItem({super.key, required this.movie});
+  const MovieListItem({super.key, required this.movie, this.autofocus = false});
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return TvFocusable(
+      autofocus: autofocus,
+      borderRadius: BorderRadius.circular(12),
+      focusScale: 1.12,
       onTap: () => context.pushNamed('movie_details',
           pathParameters: {
             'title': movie.title,
           },
           extra: movie),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: FastCachedImage(
-          url: movie.imageUrl,
-          headers: movie.imageHeaders,
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) => Container(
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(
-              Icons.movie,
-              color: Theme.of(context).colorScheme.primary,
-              size: 40,
-            ),
+      child: FastCachedImage(
+        url: movie.imageUrl,
+        headers: movie.imageHeaders,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            Icons.movie,
+            color: Theme.of(context).colorScheme.primary,
+            size: 40,
           ),
         ),
       ),
@@ -99,19 +101,29 @@ class _HomeScreenState extends State<HomeScreen> {
                     context.read<MoviesBloc>().add(LoadMoviesRequested()),
                 child: CustomScrollView(
                   slivers: [
+                    // TV safe-area: a comfortable margin around the grid so
+                    // that content isn't clipped by overscan on older TVs
+                    // (left/right larger than top/bottom because the left
+                    // side nav already provides breathing room).
                     SliverPadding(
-                      padding: const EdgeInsets.all(8),
+                      padding: const EdgeInsets.fromLTRB(32, 24, 32, 24),
                       sliver: SliverGrid(
                         gridDelegate:
                             const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 3,
-                          childAspectRatio: 0.67,
-                          crossAxisSpacing: 8,
-                          mainAxisSpacing: 8,
+                          // 6 columns fit comfortably on a 16:9 screen
+                          // after the 220px side rail is subtracted.
+                          crossAxisCount: 6,
+                          // Poster aspect ratio 2:3.
+                          childAspectRatio: 2 / 3,
+                          crossAxisSpacing: 20,
+                          mainAxisSpacing: 20,
                         ),
                         delegate: SliverChildBuilderDelegate(
                           (context, index) {
-                            return MovieListItem(movie: state.movies[index]);
+                            return MovieListItem(
+                              movie: state.movies[index],
+                              autofocus: index == 0,
+                            );
                           },
                           childCount: state.movies.length,
                         ),

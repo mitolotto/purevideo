@@ -56,9 +56,11 @@ void main() async {
       statusBarIconBrightness: Brightness.dark,
     ),
   );
+  // Android TV: force landscape only. The app targets 16:9 screens and
+  // D-Pad input, so portrait is explicitly disabled.
   SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
   ]);
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
