@@ -34,9 +34,12 @@ dependencies:
   fast_cached_network_image: ^1.3.3+5
   collection: any
   url_launcher: ^6.3.2
-  flutter_cast_framework:
-    git:
-      url: https://github.com/majusss/flutter_cast_framework.git
+  # flutter_cast_framework removed: Google Cast SDK depends on the
+  # Dynamite "cast.framework.dynamite" module which is not installable on
+  # Android TV boxes (Homatics Box R 4K Plus crashed at startup with
+  # DynamiteModule$LoadingException + UninitializedPropertyAccessException
+  # on mSessionManager). Casting from a TV box to another device makes
+  # little sense anyway — the box itself is the receiver.
   audio_service: ^0.18.18
   audio_session: ^0.2.2
   pip: ^0.0.3

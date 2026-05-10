@@ -10,7 +10,6 @@ import 'package:purevideo/presentation/global/widgets/tv_focusable.dart';
 import 'package:purevideo/presentation/player/bloc/player_bloc.dart';
 import 'package:purevideo/presentation/player/bloc/player_event.dart';
 import 'package:purevideo/presentation/player/bloc/player_state.dart';
-import 'package:flutter_cast_framework/widgets.dart';
 
 class PlayerScreen extends StatefulWidget {
   final MovieDetailsModel movie;
@@ -547,18 +546,6 @@ class _TvPlayerViewState extends State<_TvPlayerView> {
                         : Icons.fullscreen,
                     size: 48,
                     onTap: () => bloc.add(const ToggleImmersiveMode()),
-                  ),
-                  const SizedBox(width: 12),
-                  Focus(
-                    // Cast button draws its own icon button under the hood,
-                    // but we wrap in a Focus so D-Pad can still reach it
-                    // reliably on TVs without a visible overlay.
-                    child: CastButton(
-                      castFramework: state.castFramework,
-                      activeColor: Colors.white,
-                      color: Colors.white,
-                      disabledColor: Colors.white,
-                    ),
                   ),
                 ],
               ),
