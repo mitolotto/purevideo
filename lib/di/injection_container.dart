@@ -1,5 +1,4 @@
 import 'package:dio/dio.dart';
-import 'package:flutter_cast_framework/cast.dart';
 import 'package:get_it/get_it.dart';
 import 'package:purevideo/core/services/media_service.dart';
 import 'package:purevideo/core/services/merg_service.dart';
@@ -35,9 +34,8 @@ void setupInjection() {
   ));
   getIt.registerSingleton<Dio>(dio);
 
-  getIt.registerSingleton<FlutterCastFramework>(
-    FlutterCastFramework.create(['urn:x-cast:majusss-purevideo']),
-  );
+  // flutter_cast_framework is no longer registered — Google Cast is
+  // not supported on Android TV boxes (see player_bloc comment).
 
   getIt.registerFactory<CaptchaService>(() => CaptchaService());
   getIt.registerFactory<WebViewService>(() => WebViewService());

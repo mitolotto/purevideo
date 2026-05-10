@@ -1,5 +1,4 @@
 import 'package:equatable/equatable.dart';
-import 'package:flutter_cast_framework/cast.dart';
 import 'package:pip/pip.dart';
 import 'package:purevideo/data/repositories/video_source_repository.dart';
 
@@ -20,7 +19,6 @@ class PlayerState extends Equatable {
   final String? errorMessage;
   final String displayState;
 
-  final FlutterCastFramework castFramework;
   final Pip pipFramework;
 
   const PlayerState({
@@ -37,7 +35,6 @@ class PlayerState extends Equatable {
     this.selectedSource,
     this.errorMessage,
     this.displayState = 'Ładowanie...',
-    required this.castFramework,
     required this.pipFramework,
   });
 
@@ -55,7 +52,6 @@ class PlayerState extends Equatable {
     VideoSource? selectedSource,
     String? errorMessage,
     String? displayState,
-    FlutterCastFramework? castFramework,
     Pip? pipFramework,
   }) {
     return PlayerState(
@@ -72,7 +68,6 @@ class PlayerState extends Equatable {
       selectedSource: selectedSource ?? this.selectedSource,
       errorMessage: errorMessage,
       displayState: displayState ?? this.displayState,
-      castFramework: castFramework ?? this.castFramework,
       pipFramework: pipFramework ?? this.pipFramework,
     );
   }
@@ -92,6 +87,5 @@ class PlayerState extends Equatable {
         selectedSource,
         errorMessage,
         displayState,
-        castFramework,
       ];
 }

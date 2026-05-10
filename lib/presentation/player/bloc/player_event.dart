@@ -136,10 +136,3 @@ class ToggleImmersiveMode extends PlayerEvent {
 class DisposePlayer extends PlayerEvent {
   const DisposePlayer();
 }
-
-class CastVideo extends PlayerEvent {
-  const CastVideo();
-
-  @override
-  List<Object> get props => [];
-}

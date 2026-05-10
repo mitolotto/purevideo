@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:math';
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
@@ -16,9 +15,20 @@ import 'package:purevideo/data/repositories/video_source_repository.dart';
 import 'package:purevideo/di/injection_container.dart';
 import 'package:purevideo/presentation/player/bloc/player_event.dart';
 import 'package:purevideo/presentation/player/bloc/player_state.dart';
-import 'package:flutter_cast_framework/cast.dart' hide PlayerState;
 import 'package:pip/pip.dart';
 
+/// Bloc that drives the video player screen.
+///
+/// Google Cast has been deliberately removed from this bloc. The
+/// flutter_cast_framework plugin requires the Dynamite
+/// "cast.framework.dynamite" module at runtime. That module is not
+/// present on Android TV boxes (Homatics Box R 4K Plus crashed at
+/// startup with DynamiteModule$LoadingException, followed by an
+/// UninitializedPropertyAccessException in FlutterCastFrameworkPlugin's
+/// onResume where mSessionManager had never been initialized). Casting
+/// from a TV box to another device is also conceptually odd — the box
+/// is itself the receiver. The bloc now only drives local playback via
+/// media_kit plus PiP.
 class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
   final WatchedService watchedService = getIt();
 
@@ -32,7 +42,6 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
   Timer? _hideControlsTimer;
   Timer? _seekingTimer;
   Timer? _debounceHideControlsTimer;
-  VoidCallback? _castStateListener;
 
   final VideoSourceRepository _videoSourceRepository =
       getIt<VideoSourceRepository>();
@@ -46,10 +55,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
   int? _seasonIndex;
   int? _episodeIndex;
 
-  PlayerBloc()
-      : super(PlayerState(
-            castFramework: getIt<FlutterCastFramework>(),
-            pipFramework: Pip())) {
+  PlayerBloc() : super(PlayerState(pipFramework: Pip())) {
     on<InitializePlayer>(_onInitializePlayer);
     on<LoadVideoSources>(_onLoadVideoSources);
     on<InitializeVideoPlayer>(_onInitializeVideoPlayer);
@@ -68,7 +74,6 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     on<PlayerError>(_onPlayerError);
     on<DisposePlayer>(_onDisposePlayer);
     on<ToggleImmersiveMode>(_onToggleImmersiveMode);
-    on<CastVideo>(_onCastVideo);
   }
 
   @override
@@ -77,15 +82,6 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     _hideControlsTimer?.cancel();
     _seekingTimer?.cancel();
     _debounceHideControlsTimer?.cancel();
-    // Remove cast state listener if it was added
-    if (_castStateListener != null) {
-      try {
-        state.castFramework.castContext.state
-            .removeListener(_castStateListener!);
-      } catch (e) {
-        debugPrint('Error removing cast state listener: $e');
-      }
-    }
     return super.close();
   }
 
@@ -167,25 +163,30 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       controlStyle: 2,
     );
 
-    await state.pipFramework.setup(options);
-
-    await state.pipFramework
-        .registerStateChangedObserver(PipStateChangedObserver(
-      onPipStateChanged: (pipState, error) {
-        switch (pipState) {
-          case PipState.pipStateStarted:
-            emit(state.copyWith(isOverlayVisible: false));
-            _hideControlsTimer?.cancel();
-            debugPrint('PiP started');
-            break;
-          case PipState.pipStateFailed:
-            debugPrint('PiP failed: $error');
-            break;
-          default:
-            break;
-        }
-      },
-    ));
+    // PiP is not supported on many Android TV boxes; fail gracefully
+    // rather than crashing the player on startup.
+    try {
+      await state.pipFramework.setup(options);
+      await state.pipFramework
+          .registerStateChangedObserver(PipStateChangedObserver(
+        onPipStateChanged: (pipState, error) {
+          switch (pipState) {
+            case PipState.pipStateStarted:
+              emit(state.copyWith(isOverlayVisible: false));
+              _hideControlsTimer?.cancel();
+              debugPrint('PiP started');
+              break;
+            case PipState.pipStateFailed:
+              debugPrint('PiP failed: $error');
+              break;
+            default:
+              break;
+          }
+        },
+      ));
+    } catch (e) {
+      debugPrint('PiP not available on this device: $e');
+    }
 
     emit(state.copyWith(
       isLoading: true,
@@ -245,12 +246,10 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
         movieDetails = await _videoSourceRepository.scrapeVideoUrls(tempModel);
       } else {
         movieDetails = _movie!;
-        // await _videoSourceRepository.scrapeVideoUrls(_movie!); we already done this in movie details bloc
       }
 
       if (movieDetails.directUrls != null &&
           movieDetails.directUrls!.isNotEmpty) {
-        // TODO: better source selection logic
         final selectedSource = movieDetails.directUrls!.first;
 
         emit(state.copyWith(
@@ -283,32 +282,6 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       isBuffering: true,
     ));
 
-    if (state.castFramework.castContext.state.value == CastState.connected) {
-      add(const CastVideo());
-      final sessionManager = state.castFramework.castContext.sessionManager;
-      sessionManager.remoteMediaClient.onProgressUpdated =
-          (final progressMs, final durationMs) {
-        add(UpdatePosition(
-          position: Duration(milliseconds: progressMs),
-        ));
-      };
-    }
-
-    try {
-      _castStateListener = () async {
-        switch (state.castFramework.castContext.state.value) {
-          case CastState.connected:
-            add(const CastVideo());
-            break;
-          default:
-            break;
-        }
-      };
-      state.castFramework.castContext.state.addListener(_castStateListener!);
-    } catch (e) {
-      debugPrint('Error initializing google cast: $e');
-    }
-
     try {
       _audioSession = await AudioSession.instance;
       await _audioSession.configure(const AudioSessionConfiguration.music());
@@ -339,7 +312,6 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
         play: true,
       );
 
-      // Don't emit isPlaying yet - wait for buffering state change
       emit(state.copyWith(
         selectedSource: event.source,
         displayState: '',
@@ -356,7 +328,11 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     PlayPause event,
     Emitter<PlayerState> emit,
   ) async {
-    _audioSession.setActive(!state.isPlaying);
+    try {
+      _audioSession.setActive(!state.isPlaying);
+    } catch (_) {
+      // audio session may not have been initialised yet
+    }
     _player.playOrPause();
 
     if (state.isOverlayVisible) {
@@ -527,12 +503,6 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       debugPrint('Error updating playback state: $e');
     }
 
-    try {
-      state.castFramework.castContext.sessionManager.remoteMediaClient.stop();
-    } catch (e) {
-      debugPrint('Error stopping cast: $e');
-    }
-
     if (_movie != null) {
       try {
         if (_movie!.isSeries) {
@@ -582,47 +552,6 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
   }
 
   VideoController get controller => _controller;
-
-  Future<void> _onCastVideo(CastVideo event, Emitter<PlayerState> emit) async {
-    if (state.castFramework.castContext.state.value == CastState.connected) {
-      if (state.selectedSource == null) {
-        emit(state.copyWith(
-          errorMessage: 'Nie wybrano źródła wideo do przesłania.',
-        ));
-        return;
-      }
-      _player.pause();
-      state.castFramework.castContext.sessionManager.remoteMediaClient.load(
-          MediaLoadRequestData(
-              currentTime: state.position.inMilliseconds,
-              shouldAutoplay: true,
-              mediaInfo: MediaInfo(
-                  streamDuration: state.duration.inMilliseconds,
-                  streamType: StreamType.buffered,
-                  contentType: 'videos/mp4',
-                  //contentType: state.selectedSource!.url.contains('.m3u8')
-                  //    ? 'application/x-mpegurl'
-                  //    : 'video/mp4',
-                  contentId: state.selectedSource!.url,
-                  customDataAsJson:
-                      jsonEncode({'headers': state.selectedSource!.headers}),
-                  mediaMetadata: MediaMetadata(
-                      mediaType: MediaType.movie,
-                      strings: _movie!.isSeries
-                          ? {
-                              MediaMetadataKey.title.name: _movie!
-                                  .seasons![_seasonIndex!]
-                                  .episodes[_episodeIndex!]
-                                  .title,
-                              MediaMetadataKey.subtitle.name: _movie!.title,
-                            }
-                          : {MediaMetadataKey.title.name: _movie!.title},
-                      webImages: [
-                        WebImage(url: _movie!.imageUrl),
-                        WebImage(url: _movie!.imageUrl)
-                      ]))));
-    }
-  }
 
   void _updateNotification() {
     _mediaService.audioHandler.playbackState.add(PlaybackState(
