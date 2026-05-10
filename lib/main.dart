@@ -15,6 +15,7 @@ import 'package:purevideo/core/services/watched_service.dart';
 import 'package:purevideo/di/adapters_container.dart';
 import 'package:purevideo/di/injection_container.dart';
 import 'package:purevideo/presentation/global/widgets/app.dart';
+import 'package:serious_python/serious_python.dart';
 
 import 'firebase_options.dart';
 
@@ -28,9 +29,9 @@ Future<void> main() async {
     WidgetsFlutterBinding.ensureInitialized();
 
     // --- Firebase (optional on Android TV) -----------------------
-    // Firebase itself sometimes fails to initialise on TV boxes that
-    // ship only a partial Google Play Services. Wrap it in try/catch
-    // so the rest of the app boots anyway.
+    // Firebase sometimes fails to initialise on TV boxes that ship
+    // a stripped Google Play Services. Wrap it in try/catch so the
+    // rest of the app boots anyway.
     try {
       await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
@@ -56,8 +57,6 @@ Future<void> main() async {
     } catch (e, st) {
       debugPrint('Firebase initialisation failed, continuing without it: $e');
       debugPrint('$st');
-      // Still install a FlutterError handler so at least errors are
-      // printed.
       FlutterError.onError = (details) => FlutterError.presentError(details);
       PlatformDispatcher.instance.onError = (error, stack) {
         debugPrint('Unhandled platform error: $error\n$stack');
@@ -88,17 +87,28 @@ Future<void> main() async {
       ),
     );
     // Android TV: force landscape only. The app targets 16:9 screens
-    // and D-Pad input, so portrait is explicitly disabled.
+    // and D-Pad input, so portrait is explicitly disabled. Upstream
+    // uses portrait because that's what a phone wants — we override.
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
-    // Embedded Python (serious_python) was removed for Android TV.
-    // URL resolution now happens server-side via RESOLVER_BASE_URL;
-    // without a backend configured, ResolveUrlService hands raw
-    // hoster URLs to media_kit directly.
+    // Start the embedded CPython interpreter that runs
+    // resolver/main.py (packaged into app/app.zip). It exposes a
+    // Flask server on http://localhost:8080 which ResolveUrlService
+    // later talks to. Fire-and-forget: ResolveUrlService falls back
+    // to raw URLs if the server is not up yet (or fails entirely),
+    // so a Python crash can no longer brick the UI.
+    unawaited(
+      SeriousPython.run('app/app.zip').then((log) {
+        debugPrint('Python log: $log');
+      }).catchError((Object error, StackTrace st) {
+        debugPrint('Error executing Python code: $error');
+        debugPrint('$st');
+      }),
+    );
 
     runApp(PureVideoApp());
   }, (Object error, StackTrace stack) {

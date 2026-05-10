@@ -30,36 +30,25 @@ android {
     }
 
     defaultConfig {
-        // Use the upstream applicationId so Firebase's
-        // google-services.json (bundled in the repo) matches. If the
-        // install fails on TV because an upstream build is already
-        // installed with a different signing key, uninstall that first.
         applicationId = "io.github.majusss.purevideo"
         // Min SDK 21 (Android 5.0) is the minimum for the Leanback
         // launcher to recognize the app as an Android TV app.
         minSdk = maxOf(flutter.minSdkVersion, 21)
-        // Pin targetSdk to 34 (Android 14) — same level as the target
-        // device (Homatics Box R 4K Plus runs Android TV 14). Using a
-        // higher targetSdk than the device's OS can trip "app not
-        // compatible" checks on strict vendors.
+        // Pin targetSdk to 34 (Android 14) — matches the target
+        // Android TV 14 device. Using a higher targetSdk than the
+        // device's OS can trip "app not compatible" checks on strict
+        // TV vendors.
         targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // Restrict native libraries to the two ABIs actually shipped
-        // by every Android TV device we care about (Homatics Box R 4K
-        // Plus, Chromecast with Google TV, Nvidia Shield, etc.).
-        //
-        // WARNING: if a native plugin (media_kit / serious_python /
-        // libflutter.so) happens to ship only one of these ABIs and
-        // not the other, Gradle may end up with an empty lib/<abi>
-        // directory, reproducing the INSTALL_FAILED_NO_MATCHING_ABIS
-        // error we hit before. If that happens, drop armeabi-v7a and
-        // keep arm64-v8a only (every modern TV box is 64-bit).
-        ndk {
-            abiFilters.clear()
-            abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
-        }
+        // NO abiFilters: serious_python ships libpyjni.so +
+        // libpythonbundle.so in jniLibs for multiple ABIs. Filtering
+        // here (or via --target-platform in CI) can cause Gradle to
+        // pick a subset for which some plugin dependency has no
+        // binary, producing an APK whose lib/<abi>/ is empty and
+        // bricking install with INSTALL_FAILED_NO_MATCHING_ABIS.
+        // A fat APK (~180 MB) is the safe default — see PR #7.
     }
 
     signingConfigs {
@@ -68,11 +57,10 @@ android {
             keyPassword = keystoreProperties["keyPassword"]?.toString()
             storeFile = keystoreProperties["storeFile"]?.let { file(it) }
             storePassword = keystoreProperties["storePassword"]?.toString()
-            // Explicitly enable every modern APK signature scheme.
-            // Android 14 TV boxes reject APKs that only ship v1 (JAR
-            // signing) in some firmware variants. AGP by default keeps
-            // v1+v2 enabled, but v3 and v4 are opt-in — we force them
-            // on so the APK works on the widest range of TV firmwares.
+            // Enable every modern APK signature scheme explicitly.
+            // Android 14 TV boxes reject sideloaded APKs that ship
+            // only v1 (JAR signing) in some firmware variants. AGP
+            // keeps v1+v2 enabled by default — v3 and v4 are opt-in.
             enableV1Signing = true
             enableV2Signing = true
             enableV3Signing = true
@@ -86,32 +74,47 @@ android {
                 signingConfig = signingConfigs.getByName("release")
             }
 
-            // ABI set is controlled via defaultConfig.ndk.abiFilters
-            // above (arm64-v8a + armeabi-v7a). We don't also pass
-            // --target-platform in CI, so Gradle produces a fat APK
-            // filtered down to just those two ABIs. If this ever
-            // regresses to INSTALL_FAILED_NO_MATCHING_ABIS on a target
-            // device, drop armeabi-v7a first — every Android TV box we
-            // care about is 64-bit.
-
-            // Do NOT enable code shrinking / resource shrinking for this
-            // Flutter app — it breaks media_kit and serious_python
-            // native glue classes.
+            // Do NOT enable code shrinking / resource shrinking for
+            // this Flutter app — it breaks media_kit native glue and,
+            // more importantly, strips libpython symbols that
+            // serious_python's Python interpreter needs at runtime.
             isMinifyEnabled = false
             isShrinkResources = false
         }
     }
 
-    // Android 6.0+ expects native libraries (.so) to be extracted to the
-    // data partition rather than kept compressed inside the APK. With
-    // useLegacyPackaging=true some Android TV firmwares — including
-    // Android TV 14 on Homatics — return an "app not compatible" install
-    // error because they cannot mmap compressed natives. Setting it to
-    // false is the modern Play Store default.
-    packaging {
+    // Packaging options — matches upstream (majusss/purevideo)
+    // exactly. Two things matter here and both are required for
+    // the embedded CPython to boot:
+    //
+    //   1. useLegacyPackaging = true keeps .so files inside the
+    //      APK's lib/<abi>/ directory rather than extracting them
+    //      to /data at install time. serious_python's JNI loader
+    //      opens libpyjni.so / libpythonbundle.so from inside the
+    //      APK. With useLegacyPackaging = false these files end up
+    //      in a location the loader does not know about, producing
+    //      "libpyjni.so not found" on every start.
+    //
+    //   2. doNotStrip("*/<abi>/libpython*.so") disables AGP's
+    //      default strip pass over CPython. Stripping removes the
+    //      exported symbol table that Python's own C-extension
+    //      modules (ssl, hashlib, ctypes, ...) need at runtime via
+    //      dlsym. A stripped libpython boots but then crashes the
+    //      moment libresolveurl touches SSL, which is always.
+    //
+    // The older packagingOptions DSL is used on purpose: the new
+    // packaging { jniLibs { useLegacyPackaging } ; resources { ... } }
+    // block does not expose a doNotStrip counterpart in every AGP
+    // 8.x version we have tried, so we stick with what is proven
+    // to work upstream.
+    packagingOptions {
         jniLibs {
-            useLegacyPackaging = false
+            useLegacyPackaging = true
         }
+        doNotStrip("*/arm64-v8a/libpython*.so")
+        doNotStrip("*/armeabi-v7a/libpython*.so")
+        doNotStrip("*/x86/libpython*.so")
+        doNotStrip("*/x86_64/libpython*.so")
         resources {
             excludes += setOf(
                 "META-INF/DEPENDENCIES",
@@ -131,10 +134,9 @@ flutter {
     source = "../.."
 }
 
-// Kotlin 2.3 removed the legacy `android.kotlinOptions { jvmTarget = "11" }`
-// DSL (string-typed). New DSL is the top-level `kotlin { compilerOptions }`
-// extension from the Kotlin Gradle plugin, using a strongly typed
-// JvmTarget enum. See https://kotl.in/u1r8ln
+// Kotlin 2.3 removed the legacy string-typed `kotlinOptions` DSL.
+// New DSL is the top-level `kotlin { compilerOptions }` extension
+// with a strongly typed JvmTarget enum. See https://kotl.in/u1r8ln
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_11)
