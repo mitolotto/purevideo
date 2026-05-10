@@ -75,26 +75,31 @@ class FilmanAuthRepository implements AuthRepository {
   ///   1. If we already left `/logowanie` (login succeeded — filman
   ///      redirects authenticated users to `/`), hand the session
   ///      cookies back to Dart and we're done.
-  ///   2. Otherwise wait for the `#signin-form` element, fill it,
-  ///      submit it EXACTLY ONCE (using a `window.__pvFilmanState`
-  ///      guard that survives re-injection on navigation).
-  ///   3. After submit has been clicked, and only then, start
-  ///      watching for a `.alert-danger` banner — that's how filman
-  ///      reports CSRF/credentials/captcha problems. Watching for
-  ///      it BEFORE submit was the bug that kept firing
-  ///      "Nieprawidłowy token bezpieczeństwa" on devices where a
-  ///      stale flash message from an earlier attempt was already
-  ///      in the DOM on first page load.
-  ///   4. Hard 20s timeout so we never hang the dialog forever if
-  ///      filman silently redirects somewhere unexpected or the
-  ///      network drops between submit and next navigation.
+  ///   2. Otherwise wait for `#signin-form`, pre-fill the login and
+  ///      password inputs — but DO NOT click submit. Filman renders
+  ///      an in-form checkbox captcha ("nie jestem robotem") that
+  ///      the user has to tick with the TV remote; submitting before
+  ///      the captcha response is present makes the server reject
+  ///      the POST with "Nieprawidłowy token bezpieczeństwa".
+  ///      So we hand the form back to the user and wait for *their*
+  ///      click on the submit button.
+  ///   3. Hook into the form's submit event. The first submit flips
+  ///      `state.submitted` and from that point on we (a) let the
+  ///      request actually go to the server and (b) start watching
+  ///      for `.alert-danger` on the post-redirect page — that's
+  ///      filman's error channel for CSRF/credentials/captcha
+  ///      rejections. Watching for .alert-danger *before* the user
+  ///      clicks submit was the original race (fixed in PR #19);
+  ///      auto-clicking submit ourselves was the second race that
+  ///      silently skipped the captcha.
+  ///   4. Generous 180s timeout — long enough for the user to solve
+  ///      a picture captcha with a TV remote, short enough that the
+  ///      dialog doesn't hang forever if the page is broken.
   ///
   /// The script is idempotent. `onLoadStop` fires a second time
   /// after the login POST redirect, which re-injects this script;
-  /// `__pvFilmanState` makes the second pass a no-op (or picks up
-  /// the error/success path as appropriate) instead of re-filling
-  /// and re-submitting the form, which would either resubmit stale
-  /// credentials or race a fresh CSRF token.
+  /// `__pvFilmanState` (session-scoped) makes the second pass pick
+  /// up the error/success path instead of re-filling the form.
   String _getFilmanLoginScript(String login, String password,
       {String? captcha}) {
     final captchaLine = captcha != null
@@ -126,6 +131,12 @@ class FilmanAuthRepository implements AuthRepository {
         // with "Nieprawidłowy token bezpieczeństwa" we can see in the
         // log what the form actually contained (hidden CSRF inputs,
         // Turnstile widget, reCAPTCHA, etc.). This is purely diagnostic.
+        //
+        // Selectors use attribute values with quotes: unquoted values
+        // like [src*=foo.bar] are invalid per CSS (the dot makes it
+        // parse as a class selector) and throw SyntaxError at runtime,
+        // killing the snapshot itself — which is how the first
+        // diagnostic build produced no data at all.
         function snapshotForm() {
           try {
             var form = document.querySelector('#signin-form');
@@ -138,6 +149,14 @@ class FilmanAuthRepository implements AuthRepository {
                 hidden.push(n + '=' + (v ? '[' + v.length + ']' : 'empty'));
               }
             }
+            var turnstile = document.querySelector('.cf-turnstile') ||
+                            document.querySelector('iframe[src*="challenges.cloudflare.com"]');
+            var recaptcha = document.querySelector('.g-recaptcha') ||
+                            document.querySelector('iframe[src*="recaptcha"]');
+            var hcaptcha  = document.querySelector('.h-captcha') ||
+                            document.querySelector('iframe[src*="hcaptcha"]');
+            var rcResp = document.getElementById('g-recaptcha-response');
+            var tsResp = document.querySelector('input[name="cf-turnstile-response"]');
             return {
               url: window.location.href,
               pathname: window.location.pathname,
@@ -145,8 +164,11 @@ class FilmanAuthRepository implements AuthRepository {
               action: form ? form.getAttribute('action') : null,
               method: form ? form.getAttribute('method') : null,
               hiddenInputs: hidden,
-              hasTurnstile: !!document.querySelector('.cf-turnstile, [data-sitekey][class*=turnstile], iframe[src*=challenges.cloudflare]'),
-              hasRecaptcha: !!document.querySelector('.g-recaptcha, iframe[src*=recaptcha]'),
+              hasTurnstile: !!turnstile,
+              hasRecaptcha: !!recaptcha,
+              hasHcaptcha: !!hcaptcha,
+              recaptchaRespLen: rcResp ? (rcResp.value || '').length : -1,
+              turnstileRespLen: tsResp ? (tsResp.value || '').length : -1,
               cookieNames: (document.cookie || '').split(';').map(function(c){return c.trim().split('=')[0];}).filter(Boolean),
               title: document.title
             };
@@ -187,15 +209,18 @@ class FilmanAuthRepository implements AuthRepository {
           return;
         }
 
-        // Global timeout so the dialog cannot hang forever.
+        // Generous timeout: the user may need a while with the TV
+        // remote to tick the in-form "nie jestem robotem" captcha
+        // (image challenge etc.), and we don't want to yank the
+        // dialog out from under them mid-solve.
         timeoutId = setTimeout(function() {
           report({ success: false, error: 'Przekroczono czas oczekiwania na odpowiedź filman.cc.' });
-        }, 20000);
+        }, 180000);
 
-        // If we arrived back on /logowanie AFTER clicking submit,
+        // If we arrived back on /logowanie AFTER the user submitted,
         // look for the error banner. Only then — before that, any
-        // .alert-danger on the page is a stale flash from an
-        // earlier session and must be ignored.
+        // .alert-danger on the page is a stale flash from an earlier
+        // session and must be ignored.
         if (state.submitted) {
           waitForElement('.alert-danger',
             function(el) { report({ success: false, error: el.textContent.trim() }); },
@@ -203,7 +228,21 @@ class FilmanAuthRepository implements AuthRepository {
           return;
         }
 
-        // First pass on /logowanie: fill the form and click submit.
+        // First pass on /logowanie: pre-fill login/password so the
+        // user doesn't have to type with a TV remote, then HAND OVER
+        // to the user. The form has a captcha checkbox below the
+        // password field ("nie jestem robotem") that the user must
+        // click manually; auto-clicking the submit button before the
+        // captcha is solved makes the server respond with
+        // "Nieprawidłowy token bezpieczeństwa".
+        //
+        // We listen for the real submit event so that *whenever* the
+        // user clicks the button we snapshot the form state and flip
+        // `state.submitted` — letting the form POST through
+        // untouched. On the next onLoadStop (either on '/' for
+        // success, or back on '/logowanie' for failure) the re-
+        // injected script will take the appropriate branch above.
+        //
         // Extra sanity check: Cloudflare's "Just a moment..." challenge
         // pages can carry their own form-like markup. Require both the
         // form AND a submit button named "submit" before we consider
@@ -213,18 +252,30 @@ class FilmanAuthRepository implements AuthRepository {
             if (state.submitted) return;
             var form = document.querySelector('#signin-form');
             if (!form || !form.login || !form.password) return;  // still not the real form
-            // Capture a snapshot BEFORE we mutate/submit the form.
-            state.preSnap = snapshotForm();
-            state.submitted = true;
-            setState(state);
             try {
-              form.login.value = '$login';
-              form.password.value = '$password';
+              // Only overwrite if empty, so the user can correct a typo
+              // without the script clobbering their edit on a later tick.
+              if (!form.login.value) form.login.value = '$login';
+              if (!form.password.value) form.password.value = '$password';
               $captchaLine
-              btn.click();
             } catch (e) {
               report({ success: false, error: 'Nie udało się wypełnić formularza: ' + e });
+              return;
             }
+            // Hook the real submit event (not the button click —
+            // some themes intercept click handlers for validation,
+            // but the browser always fires submit on the form when
+            // the POST is actually about to go out).
+            form.addEventListener('submit', function() {
+              if (state.submitted) return;
+              state.preSnap = snapshotForm();
+              state.submitted = true;
+              setState(state);
+              // Let the submit proceed. We intentionally do NOT
+              // call preventDefault; the navigation that follows
+              // will re-inject this script and the next pass will
+              // take either the success or the .alert-danger path.
+            }, true);
           },
           function() { return state.reported || state.submitted; });
       })();
