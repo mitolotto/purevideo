@@ -30,12 +30,44 @@ jobs:
         with:
           flutter-version: 3.32.6
 
-      # serious_python setup removed: the plugin has been dropped from
-      # the Flutter app. URL resolution now goes through an external
-      # service configured via --dart-define=RESOLVER_BASE_URL.
-
       - name: Get Dependencies
         run: flutter pub get
+
+      # serious_python requires a two-step build on Android:
+      #
+      #   1. `dart run serious_python:main package <src> -p Android ...`
+      #      which prepares per-ABI directories under
+      #      $SERIOUS_PYTHON_SITE_PACKAGES (one subdir per arm64-v8a
+      #      / armeabi-v7a / x86_64) by pulling CPython runtime plus
+      #      Python dependencies from pypi.flet.dev. It also
+      #      (over)writes app/app.zip with the contents of `resolver/`.
+      #   2. `flutter build apk` then reads $SERIOUS_PYTHON_SITE_PACKAGES
+      #      in the plugin's Gradle script and produces libpyjni.so +
+      #      libpythonbundle.so + libpythonsitepackages.so for each
+      #      ABI inside the final APK.
+      #
+      # The upstream repo (majusss/purevideo) runs step 1 locally
+      # before publishing releases, which is why their CI workflow
+      # looks deceptively simple. We run it in CI so release builds
+      # are fully reproducible without relying on a maintainer's
+      # machine.
+      #
+      # NOTE: the `package` command will REWRITE app/app.zip with the
+      # contents of resolver/. That is fine — resolver/ already
+      # contains the full libresolveurl source (it's the canonical
+      # pre-zip form), so the rewritten archive is identical byte-wise
+      # on a clean checkout.
+      - name: Prepare Python site-packages for serious_python
+        env:
+          SERIOUS_PYTHON_SITE_PACKAGES: ${{ github.workspace }}/build/site-packages
+        run: |
+          mkdir -p "$SERIOUS_PYTHON_SITE_PACKAGES"
+          dart run serious_python:main package resolver \
+            --platform Android \
+            --requirements "-r,resolver/requirements.txt"
+          echo "SERIOUS_PYTHON_SITE_PACKAGES=$SERIOUS_PYTHON_SITE_PACKAGES" >> $GITHUB_ENV
+          echo "--- site-packages tree (depth 3) ---"
+          find "$SERIOUS_PYTHON_SITE_PACKAGES" -maxdepth 3 | head -40 || true
 
       - name: Generate keystore or decode from secret
         run: |
@@ -61,13 +93,13 @@ jobs:
           fi
 
       - name: Build release APK
-        # Fat APK (all 4 ABIs). Do NOT pass --target-platform:
-        # combined with serious_python's own ABI-filtered jniLibs it
-        # can produce an APK with an empty lib/<abi>/ directory and
-        # trip INSTALL_FAILED_NO_MATCHING_ABIS on install.
-        # serious_python packs libpyjni.so + libpythonbundle.so
-        # automatically during `flutter build apk` — no extra
-        # `dart run serious_python:main package` step needed.
+        # Fat APK (all ABIs that serious_python ships). The env var
+        # set above is read by serious_python_android's Gradle plugin
+        # to pack libpyjni.so / libpythonbundle.so /
+        # libpythonsitepackages.so into the right lib/<abi>/
+        # directories inside the APK.
+        env:
+          SERIOUS_PYTHON_SITE_PACKAGES: ${{ github.workspace }}/build/site-packages
         run: flutter build apk --release
 
       - name: Inspect final release APK (deep diagnostics)
