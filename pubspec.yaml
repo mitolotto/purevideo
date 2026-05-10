@@ -49,14 +49,27 @@ dependencies:
   # libresolveurl Kodi addon which de-obfuscates embed URLs from
   # voe.sx, vidara.to, boosteradx.online, ultrastream.online and
   # ~300 other hosters into direct .m3u8/.mp4 URLs that media_kit can
-  # actually play. Works out of the box on Android TV: no extra CI
-  # setup is needed — the default `flutter build apk` invocation
-  # packages CPython's .so files via serious_python's own Gradle
-  # task. The one trick is packaging: see `android/app/build.gradle.kts`
-  # for `doNotStrip` entries and `useLegacyPackaging = true`, both of
-  # which are required so that AGP does not strip libpython's symbols
-  # and leave runtime dlopen of libpyjni.so failing.
+  # actually play.
+  #
+  # IMPORTANT: the `serious_python_android` transitive dependency is
+  # pinned below via `dependency_overrides` to exactly 0.9.11. Version
+  # 0.9.12 (published same day as 0.9.11 under the same `^0.9.11`
+  # semver range) added a mandatory check for the
+  # SERIOUS_PYTHON_SITE_PACKAGES environment variable at Gradle config
+  # time. Without that variable the 0.9.12 plugin throws
+  #   > A problem occurred evaluating project ':serious_python_android'.
+  #   > SERIOUS_PYTHON_SITE_PACKAGES environment variable is not set.
+  # which breaks `flutter build apk` for anyone who is NOT running the
+  # two-step `dart run serious_python:main package` flow. The upstream
+  # majusss/purevideo repo ships pubspec.lock with 0.9.11 pinned and
+  # therefore never hits this; we achieve the same effect with an
+  # explicit override so a lockfile is not required.
   serious_python: ^0.9.11
+
+dependency_overrides:
+  # Pin the Android platform implementation to 0.9.11. See the note
+  # above `serious_python:` for the full rationale.
+  serious_python_android: 0.9.11
 
 dev_dependencies:
   flutter_test:
