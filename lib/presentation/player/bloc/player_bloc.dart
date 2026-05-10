@@ -599,10 +599,10 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
               mediaInfo: MediaInfo(
                   streamDuration: state.duration.inMilliseconds,
                   streamType: StreamType.buffered,
-                  //contentType: 'video/mp4',
-                  contentType: state.selectedSource!.url.contains('.m3u8')
-                      ? 'application/x-mpegurl'
-                      : 'video/mp4',
+                  contentType: 'videos/mp4',
+                  //contentType: state.selectedSource!.url.contains('.m3u8')
+                  //    ? 'application/x-mpegurl'
+                  //    : 'video/mp4',
                   contentId: state.selectedSource!.url,
                   customDataAsJson:
                       jsonEncode({'headers': state.selectedSource!.headers}),
