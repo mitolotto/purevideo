@@ -49,7 +49,16 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       getIt<Map<SupportedService, MovieRepository>>();
   final MediaService _mediaService = getIt<MediaService>();
 
-  late final AudioSession _audioSession;
+  // Nullable instead of `late final`: on Android TV boxes the audio
+  // session plugin (just_audio's AudioSession) can fail to initialise
+  // because several TV firmwares ship a stripped-down AudioManager
+  // without the session types it expects. When that happens, reading
+  // `_audioSession` later from _onDisposePlayer / _onPlayPause would
+  // throw LateInitializationError and kill the whole bloc (which
+  // manifests as "playback stopped -> app looks frozen"). Keeping it
+  // nullable lets every access guard with `_audioSession?.setActive(..)`
+  // and a no-op fallback.
+  AudioSession? _audioSession;
 
   MovieDetailsModel? _movie;
   int? _seasonIndex;
@@ -283,10 +292,14 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     ));
 
     try {
-      _audioSession = await AudioSession.instance;
-      await _audioSession.configure(const AudioSessionConfiguration.music());
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration.music());
+      _audioSession = session;
     } catch (e) {
       debugPrint('Error initializing audio session: $e');
+      // Leave _audioSession as null so every later access is a no-op
+      // instead of throwing LateInitializationError.
+      _audioSession = null;
     }
 
     try {
@@ -329,7 +342,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     Emitter<PlayerState> emit,
   ) async {
     try {
-      _audioSession.setActive(!state.isPlaying);
+      _audioSession?.setActive(!state.isPlaying);
     } catch (_) {
       // audio session may not have been initialised yet
     }
@@ -490,7 +503,11 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     if (isClosed) return;
 
     try {
-      _audioSession.setActive(false);
+      // `?.` guards against LateInitializationError when the user
+      // disposes the player before playback has ever started (e.g.
+      // backs out of the details screen while sources are still
+      // resolving).
+      _audioSession?.setActive(false);
     } catch (e) {
       debugPrint('Error setting audio session inactive: $e');
     }
