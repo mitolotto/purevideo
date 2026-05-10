@@ -48,7 +48,32 @@ dependencies:
   audio_session: ^0.2.2
   pip: ^0.0.3
   diacritic: ^0.1.6
-  serious_python: ^0.9.11
+  # serious_python removed: the plugin embeds a full CPython (~60 MB
+  # per ABI) that runs a Flask server on localhost, wrapping
+  # libresolveurl for URL resolution. On Android TV this was
+  # fundamentally broken:
+  #
+  #   1. Packaging: serious_python requires a two-step build. First
+  #      `dart run serious_python:main package app/src -p Android` to
+  #      download prebuilt CPython from pypi.flet.dev and emit
+  #      libpythonbundle.so + libpythonsitepackages.so via the
+  #      SERIOUS_PYTHON_BUILD_DIST env var, then the normal
+  #      `flutter build apk`. Our CI only runs step two, so the APK
+  #      never contained those .so files and every boot logged
+  #      "libpyjni.so not found" / "Python bundle not found:
+  #      lib/arm/libpythonbundle.so".
+  #   2. Even when packaged correctly, several Amlogic-based TV
+  #      firmwares (including the Homatics Box R 4K Plus) cannot
+  #      dlopen CPython because the shipped libc does not support
+  #      the _ssl / _hashlib extensions libresolveurl depends on.
+  #   3. libresolveurl needs pycryptodome, lxml, etc., which have
+  #      native extensions that pypi.flet.dev does not always ship
+  #      for arm64-v8a.
+  #
+  # Replaced with a hosted-backend model: ResolveUrlService reads
+  # RESOLVER_BASE_URL from --dart-define, and without a backend
+  # configured it falls back to handing raw hoster URLs straight to
+  # media_kit. See lib/core/services/resolve_url_service.dart.
 
 dev_dependencies:
   flutter_test:
@@ -59,5 +84,11 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  assets:
-    - app/app.zip
+  # assets:
+  #   - app/app.zip
+  # app/app.zip was loaded by serious_python to boot an embedded
+  # Python Flask server. serious_python has been removed (see the
+  # rationale next to the dependency removal above), so the asset is
+  # no longer referenced. The file is kept in the repo for now — it
+  # contains the libresolveurl source that any self-hosted backend
+  # will need.

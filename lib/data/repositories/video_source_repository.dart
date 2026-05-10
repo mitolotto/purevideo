@@ -1,3 +1,4 @@
+import 'package:equatable/equatable.dart';
 import 'package:flutter/rendering.dart';
 import 'package:purevideo/di/injection_container.dart';
 import 'package:hive/hive.dart';
@@ -5,7 +6,7 @@ import 'package:purevideo/core/services/resolve_url_service.dart';
 import 'package:purevideo/data/models/movie_model.dart';
 
 @HiveType(typeId: 3)
-class VideoSource {
+class VideoSource extends Equatable {
   @HiveField(0)
   final String url;
   @HiveField(1)
@@ -29,6 +30,15 @@ class VideoSource {
   String toString() {
     return 'VideoSource(url: $url, lang: $lang, quality: $quality, host: $host, headers: $headers)';
   }
+
+  // Intentionally ignore `headers` in equality: two VideoSources that
+  // point at the same stream URL with the same language/quality/host
+  // are the same source regardless of request-header ordering. This
+  // makes `state.videoSources.contains(state.selectedSource)` work
+  // across copyWith-driven rebuilds, which the quality-picker
+  // autofocus relies on to focus the currently selected row.
+  @override
+  List<Object?> get props => [url, lang, quality, host];
 }
 
 class VideoSourceRepository {

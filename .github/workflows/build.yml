@@ -30,24 +30,9 @@ jobs:
         with:
           flutter-version: 3.32.6
 
-      - name: Set up Python
-        # The serious_python plugin needs a set of pre-built Python
-        # site-packages at build time. We install the project's Python
-        # dependencies into a local folder and point the plugin at it
-        # via SERIOUS_PYTHON_SITE_PACKAGES.
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Prepare Python site-packages for serious_python
-        run: |
-          mkdir -p $GITHUB_WORKSPACE/serious_python_site_packages
-          if [ -f resolver/requirements.txt ]; then
-            pip install --target=$GITHUB_WORKSPACE/serious_python_site_packages -r resolver/requirements.txt
-          else
-            echo "No resolver/requirements.txt found, creating empty site-packages directory"
-          fi
-          echo "SERIOUS_PYTHON_SITE_PACKAGES=$GITHUB_WORKSPACE/serious_python_site_packages" >> $GITHUB_ENV
+      # serious_python setup removed: the plugin has been dropped from
+      # the Flutter app. URL resolution now goes through an external
+      # service configured via --dart-define=RESOLVER_BASE_URL.
 
       - name: Get Dependencies
         run: flutter pub get

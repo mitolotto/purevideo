@@ -15,7 +15,6 @@ import 'package:purevideo/core/services/watched_service.dart';
 import 'package:purevideo/di/adapters_container.dart';
 import 'package:purevideo/di/injection_container.dart';
 import 'package:purevideo/presentation/global/widgets/app.dart';
-import 'package:serious_python/serious_python.dart';
 
 import 'firebase_options.dart';
 
@@ -96,18 +95,10 @@ Future<void> main() async {
     ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
-    // serious_python's extraction and startup can take a while and
-    // occasionally fails on TV boxes where the embedded interpreter
-    // does not have a compatible libc. Run it fire-and-forget and
-    // isolate failures so they never kill the Flutter UI.
-    unawaited(
-      SeriousPython.run('app/app.zip').then((log) {
-        debugPrint('Python log: $log');
-      }).catchError((Object error, StackTrace st) {
-        debugPrint('Error executing Python code: $error');
-        debugPrint('$st');
-      }),
-    );
+    // Embedded Python (serious_python) was removed for Android TV.
+    // URL resolution now happens server-side via RESOLVER_BASE_URL;
+    // without a backend configured, ResolveUrlService hands raw
+    // hoster URLs to media_kit directly.
 
     runApp(PureVideoApp());
   }, (Object error, StackTrace stack) {
