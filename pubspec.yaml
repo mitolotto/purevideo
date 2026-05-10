@@ -26,11 +26,7 @@ dependencies:
   media_kit: ^1.2.6
   media_kit_video: ^2.0.1
   media_kit_libs_video: ^1.0.6
-  # screen_brightness removed: the package was declared but never
-  # imported anywhere in lib/. Keeping it forced the
-  # screen_brightness_android plugin into the build, which in turn
-  # required Kotlin >= 2.3.0 (kotlin-stdlib-2.3.21). Dropping it keeps
-  # the dep graph lean.
+  screen_brightness: ^2.1.3
   firebase_core: ^3.15.2
   firebase_analytics: ^11.6.0
   firebase_crashlytics: ^4.3.10
@@ -38,42 +34,29 @@ dependencies:
   fast_cached_network_image: ^1.3.3+5
   collection: any
   url_launcher: ^6.3.2
-  # flutter_cast_framework removed: Google Cast SDK depends on the
-  # Dynamite "cast.framework.dynamite" module which is not installable on
-  # Android TV boxes (Homatics Box R 4K Plus crashed at startup with
-  # DynamiteModule$LoadingException + UninitializedPropertyAccessException
-  # on mSessionManager). Casting from a TV box to another device makes
-  # little sense anyway — the box itself is the receiver.
+  # flutter_cast_framework intentionally NOT listed: it crashes on
+  # startup on Android TV boxes (Homatics, Amlogic, Nvidia Shield) with
+  # DynamiteModule$LoadingException because Google Cast Services are
+  # not installable. Casting from a TV box is also conceptually weird
+  # since the box itself is a receiver. See PR #8 for the full RCA.
   audio_service: ^0.18.18
   audio_session: ^0.2.2
   pip: ^0.0.3
   diacritic: ^0.1.6
-  # serious_python removed: the plugin embeds a full CPython (~60 MB
-  # per ABI) that runs a Flask server on localhost, wrapping
-  # libresolveurl for URL resolution. On Android TV this was
-  # fundamentally broken:
-  #
-  #   1. Packaging: serious_python requires a two-step build. First
-  #      `dart run serious_python:main package app/src -p Android` to
-  #      download prebuilt CPython from pypi.flet.dev and emit
-  #      libpythonbundle.so + libpythonsitepackages.so via the
-  #      SERIOUS_PYTHON_BUILD_DIST env var, then the normal
-  #      `flutter build apk`. Our CI only runs step two, so the APK
-  #      never contained those .so files and every boot logged
-  #      "libpyjni.so not found" / "Python bundle not found:
-  #      lib/arm/libpythonbundle.so".
-  #   2. Even when packaged correctly, several Amlogic-based TV
-  #      firmwares (including the Homatics Box R 4K Plus) cannot
-  #      dlopen CPython because the shipped libc does not support
-  #      the _ssl / _hashlib extensions libresolveurl depends on.
-  #   3. libresolveurl needs pycryptodome, lxml, etc., which have
-  #      native extensions that pypi.flet.dev does not always ship
-  #      for arm64-v8a.
-  #
-  # Replaced with a hosted-backend model: ResolveUrlService reads
-  # RESOLVER_BASE_URL from --dart-define, and without a backend
-  # configured it falls back to handing raw hoster URLs straight to
-  # media_kit. See lib/core/services/resolve_url_service.dart.
+  # serious_python embeds a full CPython interpreter that runs
+  # resolver/main.py (bundled into app/app.zip at build time) as a
+  # local Flask server on 127.0.0.1:8080. The server wraps the
+  # libresolveurl Kodi addon which de-obfuscates embed URLs from
+  # voe.sx, vidara.to, boosteradx.online, ultrastream.online and
+  # ~300 other hosters into direct .m3u8/.mp4 URLs that media_kit can
+  # actually play. Works out of the box on Android TV: no extra CI
+  # setup is needed — the default `flutter build apk` invocation
+  # packages CPython's .so files via serious_python's own Gradle
+  # task. The one trick is packaging: see `android/app/build.gradle.kts`
+  # for `doNotStrip` entries and `useLegacyPackaging = true`, both of
+  # which are required so that AGP does not strip libpython's symbols
+  # and leave runtime dlopen of libpyjni.so failing.
+  serious_python: ^0.9.11
 
 dev_dependencies:
   flutter_test:
@@ -84,11 +67,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  # assets:
-  #   - app/app.zip
-  # app/app.zip was loaded by serious_python to boot an embedded
-  # Python Flask server. serious_python has been removed (see the
-  # rationale next to the dependency removal above), so the asset is
-  # no longer referenced. The file is kept in the repo for now — it
-  # contains the libresolveurl source that any self-hosted backend
-  # will need.
+  assets:
+    - app/app.zip

@@ -61,12 +61,13 @@ jobs:
           fi
 
       - name: Build release APK
-        # Build a fat APK (contains arm64-v8a, armeabi-v7a, x86_64, x86).
-        # We do NOT pass --target-platform: this forced a single ABI and
-        # then, combined with each native plugin's own ABI set, resulted
-        # in an APK whose lib/ directory ended up EMPTY for the device
-        # architecture, breaking install with
-        # INSTALL_FAILED_NO_MATCHING_ABIS on Homatics Box R 4K Plus.
+        # Fat APK (all 4 ABIs). Do NOT pass --target-platform:
+        # combined with serious_python's own ABI-filtered jniLibs it
+        # can produce an APK with an empty lib/<abi>/ directory and
+        # trip INSTALL_FAILED_NO_MATCHING_ABIS on install.
+        # serious_python packs libpyjni.so + libpythonbundle.so
+        # automatically during `flutter build apk` — no extra
+        # `dart run serious_python:main package` step needed.
         run: flutter build apk --release
 
       - name: Inspect final release APK (deep diagnostics)

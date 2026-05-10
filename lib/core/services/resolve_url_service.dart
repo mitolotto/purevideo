@@ -11,40 +11,35 @@ import 'package:purevideo/di/injection_container.dart';
 /// Resolves raw hoster links (e.g. streamtape.com embed pages) into
 /// direct playable URLs.
 ///
-/// Historical architecture (removed):
-///   Earlier builds shipped an embedded CPython (serious_python) that
-///   ran a Flask server on http://localhost:8080 wrapping the
-///   libresolveurl Kodi addon. That approach never worked on
-///   Android TV (Amlogic libc does not load CPython's _ssl/_hashlib
-///   extensions, and our CI never ran the two-step
-///   `dart run serious_python:main package` build, so
-///   libpythonbundle.so was missing from the APK).
-///
-/// Current architecture:
-///   * serious_python is gone.
-///   * Resolution is delegated to a backend at RESOLVER_BASE_URL,
-///     typically a hosted copy of `app/temp/main.py` (FastAPI) or the
-///     Flask version bundled in `app/app.zip`. Build with:
-///
-///       flutter build apk --release \
-///         --dart-define=RESOLVER_BASE_URL=https://your.host
-///
-///   * If RESOLVER_BASE_URL is empty (default) or the backend is
-///     unreachable, we do NOT fail: we wrap the raw hoster URLs as
+/// Architecture:
+///   * An embedded CPython interpreter (via `serious_python`) runs
+///     `resolver/main.py` packaged into `app/app.zip` at build time.
+///     That Python starts a Flask server on http://localhost:8080
+///     wrapping the `libresolveurl` Kodi addon. This is the default
+///     — identical to upstream.
+///   * Optional override: pass `--dart-define=RESOLVER_BASE_URL=...`
+///     at build time to point the service at a remote backend
+///     instead. Useful if you want to host `resolver/main.py` on a
+///     home server / VPS and avoid shipping CPython in every APK.
+///     Empty or unset means "use the embedded server".
+///   * If the active backend (embedded or remote) is unreachable at
+///     request time, we do NOT fail: we wrap the raw hoster URLs as
 ///     VideoSource objects with a Referer header and let media_kit
-///     try them directly. This works for hosters that don't obfuscate
-///     the stream URL (Doodstream, plain Streamtape CDN, some
-///     Mixdrop mirrors) and, crucially, replaces "Nie znaleziono
-///     źródeł odtwarzania" with an actual attempt at playback.
+///     try them directly. That works for hosters that don't
+///     obfuscate the stream (Doodstream, plain Streamtape CDN, some
+///     Mixdrop mirrors) and replaces "Nie znaleziono źródeł
+///     odtwarzania" with an actual playback attempt.
 class ResolveUrlService {
   final Dio _dio;
 
-  /// Base URL of the resolver backend. Empty by default so freshly
-  /// installed APKs immediately use the raw-URL fallback instead of
-  /// hanging on a non-existent localhost server.
+  /// Base URL of the resolver backend. Defaults to the embedded
+  /// Python Flask server (localhost:8080, identical to upstream).
+  /// Override at build time:
+  ///   flutter build apk --release \
+  ///     --dart-define=RESOLVER_BASE_URL=https://your.host
   String serverUrl = const String.fromEnvironment(
     'RESOLVER_BASE_URL',
-    defaultValue: '',
+    defaultValue: 'http://localhost:8080',
   );
 
   /// Cached result of the last `/health` probe. `null` means we
@@ -56,19 +51,17 @@ class ResolveUrlService {
   ResolveUrlService(this._dio);
 
   Future<bool> _probeHealth() async {
-    // No backend configured at build time -> never probe, just use
-    // the raw-URL fallback. This also makes debug builds on a laptop
-    // work out of the box without any --dart-define.
+    // An explicit empty override disables the resolver entirely.
     if (serverUrl.isEmpty) return false;
     if (_serverAvailable != null) return _serverAvailable!;
     try {
       final response = await _dio.get(
         '$serverUrl/health',
         options: Options(
-          // 1.5s is plenty for localhost; if a remote backend is
-          // configured via RESOLVER_BASE_URL the user can bump this.
-          receiveTimeout: const Duration(milliseconds: 1500),
-          sendTimeout: const Duration(milliseconds: 1500),
+          // 2s is plenty for localhost and short enough that a
+          // misconfigured remote backend cannot hang the UI.
+          receiveTimeout: const Duration(seconds: 2),
+          sendTimeout: const Duration(seconds: 2),
           validateStatus: (status) => status != null && status < 500,
         ),
       );
@@ -88,8 +81,9 @@ class ResolveUrlService {
   }
 
   /// Convert a raw `HostLink` into a `VideoSource` without going
-  /// through the resolver. Used when the resolver is down; the player
-  /// gets the original embed URL and lets media_kit try its luck.
+  /// through the resolver. Used when the resolver is down; the
+  /// player receives the original embed URL and media_kit tries
+  /// to play it directly.
   VideoSource _fallbackSource(HostLink link) {
     return VideoSource(
       url: link.url,
@@ -124,8 +118,7 @@ class ResolveUrlService {
         .toList());
 
     // Short-circuit if the resolver backend is unreachable: hand raw
-    // embed URLs back so the player at least has something to try,
-    // instead of showing "nie znaleziono zrodel odtwarzania".
+    // embed URLs back so the player at least has something to try.
     if (!await _probeHealth()) {
       return urls.map(_fallbackSource).toList();
     }
@@ -143,9 +136,10 @@ class ResolveUrlService {
         options: Options(
           headers: {'Content-Type': 'application/json'},
           // Bound the total wait — the resolver can spend ~30s per
-          // link internally but we don't want the player to hang more
-          // than ~20s total, otherwise the user just sees a spinner.
-          receiveTimeout: const Duration(seconds: 20),
+          // link internally but we don't want the player to hang
+          // more than ~30s total, otherwise the user just sees a
+          // spinner.
+          receiveTimeout: const Duration(seconds: 30),
           sendTimeout: const Duration(seconds: 5),
           validateStatus: (status) => status != null && status < 500,
         ),
@@ -173,8 +167,8 @@ class ResolveUrlService {
       }).toList();
     } catch (e) {
       debugPrint('Error resolving URLs: $e — falling back to raw URLs');
-      // Mark server as unavailable for the rest of this session so we
-      // don't pay the timeout on every subsequent click.
+      // Mark server as unavailable for the rest of this session so
+      // we don't pay the timeout on every subsequent click.
       _serverAvailable = false;
       return urls.map(_fallbackSource).toList();
     }
