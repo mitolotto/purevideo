@@ -290,7 +290,15 @@ class FilmanAuthRepository implements AuthRepository {
       final webviewLogin = await getIt<WebViewService>().executeJavaScript(
           '${SupportedService.filman.baseUrl}/logowanie',
           _getFilmanLoginScript(fields['login']!, fields['password']!,
-              captcha: fields['g-recaptcha-response']));
+              captcha: fields['g-recaptcha-response']),
+          // Required: filman's _csrf input is session-bound to
+          // PHPSESSID. Without persistent cookies the cookie set
+          // on GET /logowanie is gone by the time we POST, and
+          // every login fails with "Nieprawidłowy token
+          // bezpieczeństwa". Diagnostic snapshot from PR #20
+          // confirmed cookieNames=['BKD_COOKIES'] at preSubmit
+          // and PHPSESSID only appearing post-failure.
+          persistCookies: true);
 
       try {
         final json = jsonDecode(webviewLogin!);

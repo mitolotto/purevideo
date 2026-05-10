@@ -51,13 +51,42 @@ class WebViewService {
     return completer.future;
   }
 
-  Future<String?> executeJavaScript(String url, String jsCode) async {
+  /// Opens a WebView dialog, navigates to [url], and injects [jsCode].
+  ///
+  /// [persistCookies] defaults to `false` for backwards compatibility:
+  /// we normally run the dialog in incognito with cookies/cache wiped
+  /// so one scraping attempt doesn't reuse stale state from another.
+  ///
+  /// Set it to `true` for flows that need a session cookie to survive
+  /// between the initial GET and a follow-up POST in the SAME WebView.
+  /// Filman.cc's login form is the canonical case: the hidden `_csrf`
+  /// input is tied to the `PHPSESSID` cookie set by the first GET, and
+  /// the server rejects the POST with "Nieprawidłowy token
+  /// bezpieczeństwa" if the cookie doesn't make it through. On some
+  /// Android TV firmwares (e.g. Homatics Box R 4K Plus) the
+  /// combination of `incognito: true` + `CookieManager.deleteAllCookies()`
+  /// in `onWebViewCreated` + a Cloudflare interstitial between GET and
+  /// the real page eats the `Set-Cookie: PHPSESSID` header before it
+  /// reaches the cookie jar, which is exactly what the diagnostic
+  /// snapshot from PR #20 showed: `cookieNames` at pre-submit was
+  /// `["BKD_COOKIES"]` only, `PHPSESSID` appeared only AFTER the
+  /// failing POST.
+  Future<String?> executeJavaScript(
+    String url,
+    String jsCode, {
+    bool persistCookies = false,
+  }) async {
     final completer = Completer<String?>();
 
     showDialog(
       context: getIt<GlobalContext>().context,
-      builder: (context) =>
-          _buildWebViewDialog(context, url, jsCode, completer),
+      builder: (context) => _buildWebViewDialog(
+        context,
+        url,
+        jsCode,
+        completer,
+        persistCookies: persistCookies,
+      ),
     );
 
     return completer.future;
@@ -159,8 +188,13 @@ class WebViewService {
     return completer.future;
   }
 
-  Widget _buildWebViewDialog(BuildContext context, String url, String jsCode,
-      Completer<String?> completer) {
+  Widget _buildWebViewDialog(
+    BuildContext context,
+    String url,
+    String jsCode,
+    Completer<String?> completer, {
+    bool persistCookies = false,
+  }) {
     return Dialog(
       backgroundColor: Colors.transparent,
       elevation: 0,
@@ -180,13 +214,19 @@ class WebViewService {
             disableVerticalScroll: true,
             javaScriptEnabled: true,
             domStorageEnabled: true,
-            clearCache: true,
-            cacheEnabled: false,
-            incognito: true,
+            // When we need cookies to survive between GET and POST in
+            // the same dialog (see executeJavaScript docs), the cache /
+            // incognito settings have to loosen up too — otherwise the
+            // cookie jar is wiped out from under us on Android TV.
+            clearCache: !persistCookies,
+            cacheEnabled: persistCookies,
+            incognito: !persistCookies,
           ),
           onWebViewCreated: (controller) async {
-            await CookieManager.instance().deleteAllCookies();
-            await WebStorageManager.instance().deleteAllData();
+            if (!persistCookies) {
+              await CookieManager.instance().deleteAllCookies();
+              await WebStorageManager.instance().deleteAllData();
+            }
 
             controller.addJavaScriptHandler(
               handlerName: 'messageHandler',
